@@ -13,9 +13,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/mosip/esignet/internal/clientmgmt/db"
@@ -37,29 +37,43 @@ var ErrClientConflict = errors.New("client was modified concurrently")
 // clientCacheNamespace isolates cached client rows in the shared runtime store.
 const clientCacheNamespace providers.RuntimeStoreNamespace = "client:detail"
 
+// statusActive is the canonical status of a client that may be used by the
+// authentication engine. It matches the value stored by normalizeStatus.
+const statusActive = "ACTIVE"
+
 // Service handles client management business logic.
 type Service struct {
-	q            db.Querier
-	cache        providers.RuntimeStoreProvider
-	cacheTTLSecs int64
-	logger       *applog.Logger
+	q                db.Querier
+	cache            providers.RuntimeStoreProvider
+	cacheTTLSecs     int64
+	logger           *applog.Logger
+	supportedEncAlgs []string
 }
 
 // NewService creates a Service backed by the given database connection. Client
 // lookups are cached in cache under the given TTL and invalidated on write.
-func NewService(conn *sql.DB, cache providers.RuntimeStoreProvider, cacheTTLSecs int64) *Service {
-	return &Service{q: db.New(conn), cache: cache, cacheTTLSecs: cacheTTLSecs, logger: applog.GetLogger().Named("clientmgmt")}
+// supportedEncAlgs restricts which "alg" values an EncPublicKey JWK may
+// declare (config.AppConfig.SupportedEncAlgorithms); pass nil to leave "alg"
+// unrestricted.
+func NewService(conn *sql.DB, cache providers.RuntimeStoreProvider, cacheTTLSecs int64, supportedEncAlgs []string) *Service {
+	return &Service{
+		q: db.New(conn), cache: cache, cacheTTLSecs: cacheTTLSecs,
+		logger: applog.GetLogger().Named("clientmgmt"), supportedEncAlgs: supportedEncAlgs,
+	}
 }
 
 // NewServiceWithQuerier creates a Service with an explicit Querier; use in tests
 // to inject a mock without a real database connection.
-func NewServiceWithQuerier(q db.Querier, cache providers.RuntimeStoreProvider, cacheTTLSecs int64) *Service {
-	return &Service{q: q, cache: cache, cacheTTLSecs: cacheTTLSecs, logger: applog.GetLogger().Named("clientmgmt")}
+func NewServiceWithQuerier(q db.Querier, cache providers.RuntimeStoreProvider, cacheTTLSecs int64, supportedEncAlgs []string) *Service {
+	return &Service{
+		q: q, cache: cache, cacheTTLSecs: cacheTTLSecs,
+		logger: applog.GetLogger().Named("clientmgmt"), supportedEncAlgs: supportedEncAlgs,
+	}
 }
 
 // CreateClient registers a new OIDC client.
 func (s *Service) CreateClient(ctx context.Context, profile Profile, req CreateClientRequest) (ClientResponse, error) {
-	if err := ValidateCreate(profile, req); err != nil {
+	if err := ValidateCreate(profile, req, s.supportedEncAlgs); err != nil {
 		return ClientResponse{}, err
 	}
 
@@ -94,7 +108,7 @@ func (s *Service) CreateClient(ctx context.Context, profile Profile, req CreateC
 		return ClientResponse{}, fmt.Errorf("additional_config: %w", err)
 	}
 
-	encPK, encPKHash, encPKCert, err := encKeyColumns(req.EncPublicKey, req.EncPublicKeyCert)
+	encPK, encPKHash, encPKCert, err := encKeyColumns(req.EncPublicKey, req.EncPublicKeyCert, s.supportedEncAlgs)
 	if err != nil {
 		return ClientResponse{}, err
 	}
@@ -210,7 +224,7 @@ func (s *Service) PatchClient(ctx context.Context, clientID string, req PatchCli
 	if err != nil {
 		return ClientResponse{}, err
 	}
-	if err := ValidatePatch(ProfileClient, merged, fields, req.EncPublicKey); err != nil {
+	if err := ValidatePatch(ProfileClient, merged, fields, req.EncPublicKey, s.supportedEncAlgs); err != nil {
 		return ClientResponse{}, err
 	}
 
@@ -256,7 +270,7 @@ func (s *Service) PatchClient(ctx context.Context, clientID string, req PatchCli
 			encPKHash = sql.NullString{}
 			encPKCert = sql.NullString{}
 		} else {
-			if err := validateJWK(req.EncPublicKey.Value); err != nil {
+			if err := validateEncJWK(req.EncPublicKey.Value, s.supportedEncAlgs); err != nil {
 				return ClientResponse{}, err
 			}
 			pkJSON, err := marshalJWK(req.EncPublicKey.Value)
@@ -321,6 +335,30 @@ func (s *Service) GetClient(ctx context.Context, clientID string) (ClientRespons
 	return toResponse(row)
 }
 
+// GetActiveClient retrieves a client by ID only when its status is ACTIVE,
+// serving from cache when possible. The authentication engine (actor, consent
+// and i18n providers, executors, and authenticators) must never operate on a
+// deactivated client, so a missing row and a non-ACTIVE row are both reported
+// as ErrClientNotFound.
+func (s *Service) GetActiveClient(ctx context.Context, clientID string) (ClientResponse, error) {
+	if row, ok := s.getCachedRow(ctx, clientID); ok {
+		if row.Status != statusActive {
+			return ClientResponse{}, ErrClientNotFound
+		}
+		return toResponse(row)
+	}
+
+	row, err := s.q.GetActiveClient(ctx, clientID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ClientResponse{}, ErrClientNotFound
+		}
+		return ClientResponse{}, fmt.Errorf("get active client: %w", err)
+	}
+	s.cacheRow(ctx, clientID, row)
+	return toResponse(row)
+}
+
 // getCachedRow returns the cached row for clientID, if present. Any cache
 // read/decode error is logged and treated as a miss: Postgres remains the
 // source of truth, so a cache problem must never fail the request.
@@ -330,7 +368,7 @@ func (s *Service) getCachedRow(ctx context.Context, clientID string) (db.ClientD
 	}
 	data, err := s.cache.Get(ctx, clientCacheNamespace, clientID)
 	if err != nil {
-		s.logger.Warn("client cache get failed", applog.String("client_id", clientID), applog.Error(err))
+		s.logger.Warn(ctx, "client cache get failed", applog.String("client_id", clientID), applog.Error(err))
 		return db.ClientDetail{}, false
 	}
 	if data == nil {
@@ -338,10 +376,10 @@ func (s *Service) getCachedRow(ctx context.Context, clientID string) (db.ClientD
 	}
 	var row db.ClientDetail
 	if err := json.Unmarshal(data, &row); err != nil {
-		s.logger.Warn("client cache decode failed", applog.String("client_id", clientID), applog.Error(err))
+		s.logger.Warn(ctx, "client cache decode failed", applog.String("client_id", clientID), applog.Error(err))
 		return db.ClientDetail{}, false
 	}
-	s.logger.Debug("client cache hit", applog.String("client_id", clientID))
+	s.logger.Debug(ctx, "client cache hit", applog.String("client_id", clientID))
 	return row, true
 }
 
@@ -353,11 +391,11 @@ func (s *Service) cacheRow(ctx context.Context, clientID string, row db.ClientDe
 	}
 	data, err := json.Marshal(row)
 	if err != nil {
-		s.logger.Warn("client cache encode failed", applog.String("client_id", clientID), applog.Error(err))
+		s.logger.Warn(ctx, "client cache encode failed", applog.String("client_id", clientID), applog.Error(err))
 		return
 	}
 	if err := s.cache.Put(ctx, clientCacheNamespace, clientID, data, s.cacheTTLSecs); err != nil {
-		s.logger.Warn("client cache put failed", applog.String("client_id", clientID), applog.Error(err))
+		s.logger.Warn(ctx, "client cache put failed", applog.String("client_id", clientID), applog.Error(err))
 	}
 }
 
@@ -371,7 +409,7 @@ func (s *Service) invalidateCache(ctx context.Context, clientID string) error {
 		return nil
 	}
 	if err := s.cache.Delete(ctx, clientCacheNamespace, clientID); err != nil {
-		s.logger.Warn("client cache invalidate failed", applog.String("client_id", clientID), applog.Error(err))
+		s.logger.Warn(ctx, "client cache invalidate failed", applog.String("client_id", clientID), applog.Error(err))
 		return fmt.Errorf("invalidate client cache: %w", err)
 	}
 	return nil
@@ -484,11 +522,11 @@ func parseClientName(name string) (string, map[string]string, error) {
 	return clientName, withoutNone, nil
 }
 
-func encKeyColumns(encKey map[string]string, cert string) (sql.NullString, sql.NullString, sql.NullString, error) {
+func encKeyColumns(encKey map[string]string, cert string, supportedEncAlgs []string) (sql.NullString, sql.NullString, sql.NullString, error) {
 	if len(encKey) == 0 {
 		return sql.NullString{}, sql.NullString{}, sql.NullString{}, nil
 	}
-	if err := validateJWK(encKey); err != nil {
+	if err := validateEncJWK(encKey, supportedEncAlgs); err != nil {
 		return sql.NullString{}, sql.NullString{}, sql.NullString{}, err
 	}
 	pkJSON, err := marshalJWK(encKey)
@@ -542,13 +580,15 @@ func unmarshalAdditionalConfig(s sql.NullString) (map[string]any, error) {
 }
 
 func isDuplicateClientID(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "23505") &&
-		(strings.Contains(msg, "pk_clntdtl_id") || strings.Contains(msg, "client_detail_pkey"))
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		(pgErr.ConstraintName == "pk_clntdtl_id" || pgErr.ConstraintName == "client_detail_pkey")
 }
 
 func isDuplicatePublicKeyHash(err error) bool {
-	return strings.Contains(err.Error(), "uk_clntdtl_public_key_hash")
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "uk_clntdtl_public_key_hash"
 }
 
 func toResponse(row db.ClientDetail) (ClientResponse, error) {

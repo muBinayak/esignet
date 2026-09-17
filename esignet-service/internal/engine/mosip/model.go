@@ -120,7 +120,7 @@ type IdaKycExchangeRequest struct {
 	TransactionID             string                   `json:"transactionID,omitempty"`
 	KycToken                  string                   `json:"kycToken,omitempty"`
 	ConsentObtained           []string                 `json:"consentObtained,omitempty"`
-	Locales                   []string                 `json:"locales,omitempty"`
+	Locales                   []string                 `json:"locales"`
 	RespType                  string                   `json:"respType,omitempty"`
 	IndividualID              string                   `json:"individualId,omitempty"`
 	Metadata                  map[string]interface{}   `json:"metadata,omitempty"`
@@ -191,4 +191,25 @@ type ServiceError struct {
 // list is inspected; the response payload is ignored.
 type AuditResponseWrapper struct {
 	Errors []ServiceError `json:"errors"`
+}
+
+// CertificateResponseWrapper is the getAllCertificates API response envelope.
+type CertificateResponseWrapper struct {
+	ID           string                      `json:"id,omitempty"`
+	Version      string                      `json:"version,omitempty"`
+	ResponseTime string                      `json:"responsetime,omitempty"` // usually ISO8601 / RFC3339
+	Response     *GetAllCertificatesResponse `json:"response,omitempty"`
+	Errors       []Error                     `json:"errors,omitempty"`
+}
+
+// GetAllCertificatesResponse is the getAllCertificates API success payload.
+type GetAllCertificatesResponse struct {
+	AllCertificates []KycSigningCertificateData `json:"allCertificates"`
+}
+
+// KycSigningCertificateData is a single signing certificate entry returned
+// by the getAllCertificates API.
+type KycSigningCertificateData struct {
+	KeyID           string `json:"keyId"`
+	CertificateData string `json:"certificateData"` // X509 certificate
 }

@@ -10,6 +10,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/common"
@@ -24,12 +25,12 @@ import (
 const (
 
 	// Keys used in the client additionalConfig map
-	parRequired                = "require_pushed_authorization_requests"
-	dpopRequired               = "dpop_bound_access_tokens"
-	pkceRequired               = "require_pkce"
-	userinfoResponseType       = "userinfo_response_type"
-	consentExpireInMins        = "consent_expire_in_mins"
-	allowedAuthorizationScopes = "allowed_authorization_scopes"
+	parRequired          = "require_pushed_authorization_requests"
+	dpopRequired         = "dpop_bound_access_tokens"
+	pkceRequired         = "require_pkce"
+	userinfoResponseType = "userinfo_response_type"
+	idTokenResponseType  = "id_token_response_type"
+	consentExpireInMins  = "consent_expire_in_mins"
 
 	// Map keys
 	jwks        = "JWKS"
@@ -37,6 +38,10 @@ const (
 	description = "description"
 	logoURL     = "logo_url"
 	app         = "app"
+
+	// encryptionEncA256GCM is the fixed JWE "enc" algorithm used for
+	// userinfo and id_token encryption.
+	encryptionEncA256GCM = "A256GCM"
 )
 
 type actorProvider struct {
@@ -52,15 +57,27 @@ func NewActorProvider(clientSvc *clientmgmt.Service, config *config.AppConfig) p
 func (p *actorProvider) GetOAuthClientByClientID(
 	ctx context.Context, clientID string,
 ) (*providers.OAuthClient, *common.ServiceError) {
-	client, err := p.clientSvc.GetClient(ctx, clientID)
+	client, err := p.clientSvc.GetActiveClient(ctx, clientID)
 	if err != nil {
-		applog.GetLogger().Debug("OAuth client lookup failed", applog.String("clientId", clientID), applog.Error(err))
-		return nil, shared.ClientNotFoundError
+		if errors.Is(err, clientmgmt.ErrClientNotFound) {
+			return nil, nil
+		}
+		applog.GetLogger().Error(ctx, "OAuth client lookup failed", applog.String("clientId", clientID), applog.Error(err))
+		return nil, shared.InternalServerError
 	}
 
 	requirePushedAuthorizationRequests, _ := client.AdditionalConfig[parRequired].(bool)
 	dpopBoundAccessTokens, _ := client.AdditionalConfig[dpopRequired].(bool)
 	isPKCERequired, _ := client.AdditionalConfig[pkceRequired].(bool)
+	userInfo, svcErr := getUserInfoConfig(client.AdditionalConfig, client.Claims, client.EncPublicKey)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	idToken, svcErr := getIDTokenConfig(client.AdditionalConfig, client.EncPublicKey)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
 	return &providers.OAuthClient{
 		ID:                      client.ClientID,
 		OUID:                    client.RpID,
@@ -78,21 +95,17 @@ func (p *actorProvider) GetOAuthClientByClientID(
 		RequirePushedAuthorizationRequests: requirePushedAuthorizationRequests,
 		DPoPBoundAccessTokens:              dpopBoundAccessTokens,
 		AcrValues:                          client.AcrValues,
-		UserInfo: &providers.UserInfoConfig{
-			ResponseType:   getUserinfoResponseType(client.AdditionalConfig),
-			UserAttributes: client.Claims,
-		},
-		Scopes:      getAllowedScopes(p.config.ScopeClaims, client.AdditionalConfig),
-		ScopeClaims: getScopeClaimsMapping(p.config.ScopeClaims, client.Claims),
+		UserInfo:                           userInfo,
+		Scopes:                             getAllowedScopes(p.config.ScopeClaims, client.AdditionalConfig),
+		ScopeClaims:                        getScopeClaimsMapping(p.config.ScopeClaims, client.Claims),
 		Token: &providers.OAuthTokenConfig{
 			AccessToken: &providers.AccessTokenConfig{
+				DefaultAudience: p.config.Issuer,
 				UserConfig: &providers.AccessTokenSubConfig{
 					Attributes: []string{},
 				},
 			},
-			IDToken: &providers.IDTokenConfig{
-				UserAttributes: []string{},
-			},
+			IDToken: idToken,
 		},
 	}, nil
 }
@@ -100,14 +113,25 @@ func (p *actorProvider) GetOAuthClientByClientID(
 func (p *actorProvider) GetOAuthProfileByID(
 	ctx context.Context, id string,
 ) (*providers.OAuthProfile, *common.ServiceError) {
-	client, err := p.clientSvc.GetClient(ctx, id)
+	client, err := p.clientSvc.GetActiveClient(ctx, id)
 	if err != nil {
-		applog.GetLogger().Debug("OAuth profile lookup failed", applog.String("clientId", id), applog.Error(err))
-		return nil, shared.ClientNotFoundError
+		if errors.Is(err, clientmgmt.ErrClientNotFound) {
+			return nil, shared.ClientNotFoundError
+		}
+		applog.GetLogger().Error(ctx, "OAuth profile lookup failed", applog.String("clientId", id), applog.Error(err))
+		return nil, shared.InternalServerError
 	}
 	requirePushedAuthorizationRequests, _ := client.AdditionalConfig[parRequired].(bool)
 	dpopBoundAccessTokens, _ := client.AdditionalConfig[dpopRequired].(bool)
 	isPKCERequired, _ := client.AdditionalConfig[pkceRequired].(bool)
+	userInfo, svcErr := getUserInfoConfig(client.AdditionalConfig, client.Claims, client.EncPublicKey)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	idToken, svcErr := getIDTokenConfig(client.AdditionalConfig, client.EncPublicKey)
+	if svcErr != nil {
+		return nil, svcErr
+	}
 	return &providers.OAuthProfile{
 		RedirectURIs:                       client.RedirectURIs,
 		GrantTypes:                         client.GrantTypes,
@@ -123,15 +147,11 @@ func (p *actorProvider) GetOAuthProfileByID(
 				UserConfig: &providers.AccessTokenSubConfig{
 					Attributes: []string{},
 				},
+				DefaultAudience: p.config.Issuer,
 			},
-			IDToken: &providers.IDTokenConfig{
-				UserAttributes: []string{},
-			},
+			IDToken: idToken,
 		},
-		UserInfo: &providers.UserInfoConfig{
-			ResponseType:   getUserinfoResponseType(client.AdditionalConfig),
-			UserAttributes: client.Claims,
-		},
+		UserInfo:    userInfo,
 		Scopes:      getAllowedScopes(p.config.ScopeClaims, client.AdditionalConfig),
 		ScopeClaims: getScopeClaimsMapping(p.config.ScopeClaims, client.Claims),
 		Certificate: &providers.Certificate{
@@ -145,10 +165,13 @@ func (p *actorProvider) GetOAuthProfileByID(
 func (p *actorProvider) GetInboundClientByID(
 	ctx context.Context, id string,
 ) (*providers.InboundClient, *common.ServiceError) {
-	client, err := p.clientSvc.GetClient(ctx, id)
+	client, err := p.clientSvc.GetActiveClient(ctx, id)
 	if err != nil {
-		applog.GetLogger().Debug("inbound client lookup failed", applog.String("clientId", id), applog.Error(err))
-		return nil, shared.ClientNotFoundError
+		if errors.Is(err, clientmgmt.ErrClientNotFound) {
+			return nil, shared.ClientNotFoundError
+		}
+		applog.GetLogger().Error(ctx, "inbound client lookup failed", applog.String("clientId", id), applog.Error(err))
+		return nil, shared.InternalServerError
 	}
 
 	properties := make(map[string]interface{})
@@ -168,7 +191,7 @@ func (p *actorProvider) GetInboundClientByID(
 			UserAttributes: client.Claims,
 		},
 		LoginConsent: &providers.LoginConsentConfig{
-			ValidityPeriod: configInt64(client.AdditionalConfig, consentExpireInMins, 0),
+			ValidityPeriod: configInt64(client.AdditionalConfig, consentExpireInMins, 0) * 60,
 		},
 		Properties: properties,
 		IsReadOnly: false,
@@ -182,19 +205,26 @@ func (p *actorProvider) AuthenticateActor(
 }
 
 func (p *actorProvider) GetActor(id string) (*providers.Entity, *common.ServiceError) {
-	client, err := p.clientSvc.GetClient(context.Background(), id)
+	client, err := p.clientSvc.GetActiveClient(context.Background(), id)
 	if err != nil {
-		applog.GetLogger().Debug("actor lookup failed", applog.String("clientId", id), applog.Error(err))
-		return nil, shared.ClientNotFoundError
+		if errors.Is(err, clientmgmt.ErrClientNotFound) {
+			return nil, shared.ClientNotFoundError
+		}
+		applog.GetLogger().Error(context.Background(), "actor lookup failed", applog.String("clientId", id), applog.Error(err))
+		return nil, shared.InternalServerError
 	}
 
 	clientAttributes := map[string]interface{}{
 		name:        client.ClientName,
 		description: client.ClientName,
 	}
+	if len(client.ClientNameLangMap) > 0 {
+		// Fixed reference; ResolveTranslations resolves it per-request via namespace=clientID.
+		clientAttributes[name] = "{{t(" + clientNameNamespace + ":name)}}"
+	}
 	data, err := json.Marshal(clientAttributes)
 	if err != nil {
-		applog.GetLogger().Warn("failed to marshal client attributes", applog.Error(err))
+		applog.GetLogger().Warn(context.Background(), "failed to marshal client attributes", applog.Error(err))
 	}
 
 	return &providers.Entity{
@@ -210,6 +240,10 @@ func (p *actorProvider) GetActor(id string) (*providers.Entity, *common.ServiceE
 }
 
 func (p *actorProvider) GetActorGroups(_ string) ([]providers.EntityGroup, *common.ServiceError) {
+	return nil, nil
+}
+
+func (p *actorProvider) GetActorRoles(_ string, _ []string) ([]string, *common.ServiceError) {
 	return nil, nil
 }
 
@@ -246,28 +280,7 @@ func getAllowedScopes(standardScopeClaims map[string][]string, additionalConfig 
 	}
 	sort.Strings(scopes)
 
-	return append(scopes, additionalAuthorizationScopes(additionalConfig)...)
-}
-
-// additionalAuthorizationScopes extracts allowedAuthorizationScopes from
-// additionalConfig. The value is []string when set programmatically, but
-// []any when decoded from JSON (e.g. read back from the database), so both
-// representations are accepted.
-func additionalAuthorizationScopes(additionalConfig map[string]any) []string {
-	switch v := additionalConfig[allowedAuthorizationScopes].(type) {
-	case []string:
-		return v
-	case []any:
-		scopes := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				scopes = append(scopes, s)
-			}
-		}
-		return scopes
-	default:
-		return nil
-	}
+	return append(scopes, shared.AllowedAuthorizationScopes(additionalConfig)...)
 }
 
 // getScopeClaimsMapping builds a scope-to-claims mapping for the standard
@@ -292,12 +305,69 @@ func getScopeClaimsMapping(standardScopeClaims map[string][]string, claims []str
 	return mapping
 }
 
-func getUserinfoResponseType(additionalConfig map[string]any) providers.UserInfoResponseType {
-	respType, _ := additionalConfig[userinfoResponseType].(string)
-	if respType == "JWE" {
-		return providers.UserInfoResponseTypeJWE
+// getUserInfoConfig builds the userinfo endpoint configuration. The client-facing
+// "JWE" option is served as a sign-then-encrypt Nested JWT: decrypting the response
+// must yield a signed JWT carrying the claims.
+func getUserInfoConfig(
+	additionalConfig map[string]any, claims []string, encPublicKey string,
+) (*providers.UserInfoConfig, *common.ServiceError) {
+	responseType := providers.UserInfoResponseTypeJWS
+	if respType, _ := additionalConfig[userinfoResponseType].(string); respType == "JWE" {
+		responseType = providers.UserInfoResponseTypeNESTEDJWT
 	}
-	return providers.UserInfoResponseTypeJWS
+	userInfo := &providers.UserInfoConfig{
+		ResponseType:   responseType,
+		UserAttributes: claims,
+	}
+	if responseType == providers.UserInfoResponseTypeNESTEDJWT {
+		alg, ok := encryptionKeyAlg(encPublicKey)
+		if !ok {
+			return nil, shared.MissingEncryptionKeyAlgError
+		}
+		userInfo.EncryptionAlg = alg
+		userInfo.EncryptionEnc = encryptionEncA256GCM
+	}
+	return userInfo, nil
+}
+
+// getIDTokenConfig builds the ID token configuration. When the response type
+// is JWE, the client's encryption key must already carry an alg field
+// (enforced at client registration time by clientmgmt), which is propagated
+// as the id_token encryption alg alongside a fixed A256GCM enc.
+func getIDTokenConfig(
+	additionalConfig map[string]any, encPublicKey string,
+) (*providers.IDTokenConfig, *common.ServiceError) {
+	responseType := providers.IDTokenResponseTypeJWT
+	if respType, _ := additionalConfig[idTokenResponseType].(string); respType == "JWE" {
+		responseType = providers.IDTokenResponseTypeNESTEDJWT
+	}
+	idToken := &providers.IDTokenConfig{
+		ResponseType:   responseType,
+		UserAttributes: []string{},
+	}
+	if responseType == providers.IDTokenResponseTypeNESTEDJWT {
+		alg, ok := encryptionKeyAlg(encPublicKey)
+		if !ok {
+			return nil, shared.MissingEncryptionKeyAlgError
+		}
+		idToken.EncryptionAlg = alg
+		idToken.EncryptionEnc = encryptionEncA256GCM
+	}
+	return idToken, nil
+}
+
+// encryptionKeyAlg extracts the alg field from a client's encryption key JWK.
+func encryptionKeyAlg(encPublicKey string) (string, bool) {
+	if encPublicKey == "" {
+		return "", false
+	}
+	var jwk struct {
+		Alg string `json:"alg"`
+	}
+	if err := json.Unmarshal([]byte(encPublicKey), &jwk); err != nil || jwk.Alg == "" {
+		return "", false
+	}
+	return jwk.Alg, true
 }
 
 func configInt64(cfg map[string]any, key string, defaultValue int64) int64 {

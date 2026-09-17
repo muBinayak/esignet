@@ -39,7 +39,7 @@ var ClientNotFoundError = &common.ServiceError{
 
 // InvalidIndividualIDError is returned when the individual_id in identifiers is missing or invalid.
 var InvalidIndividualIDError = &common.ServiceError{
-	Code: "missing_or_invalid_individual_id",
+	Code: "AUTHN-MGR-1007",
 	Type: common.ClientErrorType,
 	Error: common.I18nMessage{
 		Key:          "missing_or_invalid_individual_id",
@@ -53,7 +53,7 @@ var InvalidIndividualIDError = &common.ServiceError{
 
 // InvalidRequestError is returned when the request is invalid.
 var InvalidRequestError = &common.ServiceError{
-	Code: "invalid_request",
+	Code: "AUTHN-MGR-1008",
 	Type: common.ClientErrorType,
 	Error: common.I18nMessage{
 		Key:          "invalid_request",
@@ -67,7 +67,7 @@ var InvalidRequestError = &common.ServiceError{
 
 // AuthenticationFailedError is returned when the authentication failed.
 var AuthenticationFailedError = &common.ServiceError{
-	Code: "authentication_failed",
+	Code: "AUTHN-MGR-1001",
 	Type: common.ClientErrorType,
 	Error: common.I18nMessage{
 		Key:          "authentication_failed",
@@ -90,6 +90,36 @@ var SendOTPFailedError = &common.ServiceError{
 	ErrorDescription: common.I18nMessage{
 		Key:          "send_otp_failed_description",
 		DefaultValue: "The send OTP failed with the given credentials",
+	},
+}
+
+// MaxOTPAttemptsReachedError is returned when the maximum number of OTP generation/resend
+// attempts has been reached for a flow session.
+var MaxOTPAttemptsReachedError = &common.ServiceError{
+	Code: "max_otp_attempts_reached",
+	Type: common.ClientErrorType,
+	Error: common.I18nMessage{
+		Key:          "flows.executor.errors.max_otp_attempts_reached",
+		DefaultValue: "Maximum OTP attempts reached",
+	},
+	ErrorDescription: common.I18nMessage{
+		Key:          "flows.executor.errors.max_otp_attempts_reached_desc",
+		DefaultValue: "The maximum number of OTP verification attempts has been reached",
+	},
+}
+
+// MissingEncryptionKeyAlgError is returned when a client's userinfo response
+// type is JWE but its encryption key has no alg field.
+var MissingEncryptionKeyAlgError = &common.ServiceError{
+	Code: "missing_encryption_key_alg",
+	Type: common.ClientErrorType,
+	Error: common.I18nMessage{
+		Key:          "missing_encryption_key_alg",
+		DefaultValue: "Missing encryption key alg",
+	},
+	ErrorDescription: common.I18nMessage{
+		Key:          "missing_encryption_key_alg_description",
+		DefaultValue: "The client's encryption key does not have an alg field",
 	},
 }
 
@@ -118,5 +148,47 @@ var FileUnmarshallError = &common.ServiceError{
 	ErrorDescription: common.I18nMessage{
 		Key:          "file_unmarshall_error_description",
 		DefaultValue: "The file could not be unmarshalled",
+	},
+}
+
+// CertificateFetchFailed is returned when a failed to fetch certificate from IDA.
+var CertificateFetchFailed = &common.ServiceError{
+	Code: "certificate_fetch_failed",
+	Type: common.ClientErrorType,
+	Error: common.I18nMessage{
+		Key:          "certificate_fetch_failed",
+		DefaultValue: "Certificate fetch failed",
+	},
+	ErrorDescription: common.I18nMessage{
+		Key:          "certificate_fetch_failed_description",
+		DefaultValue: "The certificate could not be fetched",
+	},
+}
+
+// AuthTokenFetchFailed is returned when a failed to fetch auth token from authmanager.
+var AuthTokenFetchFailed = &common.ServiceError{
+	Code: "auth_token_fetch_failed",
+	Type: common.ClientErrorType,
+	Error: common.I18nMessage{
+		Key:          "auth_token_fetch_failed",
+		DefaultValue: "Auth token fetch failed",
+	},
+	ErrorDescription: common.I18nMessage{
+		Key:          "auth_token_fetch_failed_description",
+		DefaultValue: "The auth token could not be fetched",
+	},
+}
+
+// InternalServerError is returned when an unexpected server-side failure occurs.
+var InternalServerError = &common.ServiceError{
+	Code: "server_error",
+	Type: common.ServerErrorType,
+	Error: common.I18nMessage{
+		Key:          "server_error",
+		DefaultValue: "Internal server error",
+	},
+	ErrorDescription: common.I18nMessage{
+		Key:          "server_error_description",
+		DefaultValue: "An unexpected error occurred while processing the request",
 	},
 }

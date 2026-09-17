@@ -1,0 +1,1137 @@
+package e2e
+
+import (
+	"bytes"
+	"context"
+	"crypto/rsa"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/mosip/esignet/api-test/internal/esignet"
+	"github.com/mosip/esignet/api-test/internal/httpx"
+	"github.com/mosip/esignet/api-test/internal/result"
+)
+
+// Spec is the E2E test definition (loaded from JSON): how to register the test client and the list of scenarios to run against it.
+type Spec struct {
+	RedirectURI string     `json:"redirect_uri"`
+	UserClaims  []string   `json:"user_claims"` // claims registered on the client
+	Acr         []string   `json:"acr"`         // authContextRefs registered on the client
+	Scenarios   []Scenario `json:"scenarios"`
+}
+
+// Filter narrows a Spec's scenarios for a focused run.
+type Filter struct {
+	AuthFactors []string // keep only these auth_factors (case insensitive)
+	Include     []string // keep only names matching at least one regex
+	Exclude     []string // drop names matching any regex; applied last, so it wins
+}
+
+// Empty reports whether the filter would keep every scenario.
+func (f Filter) Empty() bool {
+	return len(f.AuthFactors) == 0 && len(f.Include) == 0 && len(f.Exclude) == 0
+}
+
+// Select returns a copy of s holding only the scenarios the filter keeps.
+func (s Spec) Select(f Filter) (Spec, error) {
+	if f.Empty() {
+		return s, nil
+	}
+	include, err := compileAll(f.Include)
+	if err != nil {
+		return s, err
+	}
+	exclude, err := compileAll(f.Exclude)
+	if err != nil {
+		return s, err
+	}
+	factors := map[string]bool{}
+	for _, x := range f.AuthFactors {
+		factors[strings.ToLower(strings.TrimSpace(x))] = true
+	}
+
+	out := s
+	out.Scenarios = nil
+	for _, sc := range s.Scenarios {
+		if len(factors) > 0 && !factors[strings.ToLower(strings.TrimSpace(sc.AuthFactor))] {
+			continue
+		}
+		if len(include) > 0 && !matchAny(include, sc.Name) {
+			continue
+		}
+		if matchAny(exclude, sc.Name) {
+			continue
+		}
+		out.Scenarios = append(out.Scenarios, sc)
+	}
+	if len(out.Scenarios) == 0 {
+		return out, fmt.Errorf("e2e scenario filter matched none of the %d scenarios (auth_factors=%v include=%v exclude=%v)",
+			len(s.Scenarios), f.AuthFactors, f.Include, f.Exclude)
+	}
+	return out, nil
+}
+
+func compileAll(exprs []string) ([]*regexp.Regexp, error) {
+	var out []*regexp.Regexp
+	for _, e := range exprs {
+		re, err := regexp.Compile(e)
+		if err != nil {
+			return nil, fmt.Errorf("invalid e2e scenario regex %q: %w", e, err)
+		}
+		out = append(out, re)
+	}
+	return out, nil
+}
+
+func matchAny(res []*regexp.Regexp, s string) bool {
+	for _, re := range res {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// Scenario is one full-flow case: the ACR and credentials to drive, the scopes/claims to request.
+type Scenario struct {
+	Name string `json:"name"`
+
+	// AuthFactor selects the ACR this scenario drives: otp | password | bio | kbi.
+	AuthFactor string `json:"auth_factor"`
+
+	// Credentials overrides the plugin's base identity answers for just this scenario.
+	Credentials map[string]string `json:"credentials"`
+
+	// OmitCredentials removes these keys (after Credentials overrides are
+	// merged in) from just this scenario's answers, so a negative case can
+	// submit no value at all rather than an empty one — the two are not
+	// equivalent when the target accepts any non-empty value as valid.
+	OmitCredentials []string `json:"omit_credentials"`
+
+	// ExpectLoginFailure marks a negative case: the flow is expected to be rejected anywhere in the chain, not only at login.
+	ExpectLoginFailure bool `json:"expect_login_failure"`
+
+	// ExpectErrorContains additionally requires the rejection to mention this substring; only meaningful with expect_login_failure.
+	ExpectErrorContains string `json:"expect_error_contains"`
+
+	// Consent controls how the consent step is answered and what is asserted about it.
+	Consent *ConsentSpec `json:"consent"`
+
+	// ClientConfig is the additionalConfig the scenario's client is registered with; scenarios asking for the same config share one client.
+	ClientConfig *ClientConfig `json:"client_config"`
+
+	// Flow overrides what the relying party actually sends; omitted, the RP does whatever the client config demands.
+	Flow *FlowSpec `json:"flow"`
+
+	// ClientLifecycle deactivates (and optionally reactivates) the scenario's own client partway through the flow.
+	ClientLifecycle *ClientLifecycle `json:"client_lifecycle"`
+
+	// Introspect submits the tokens the flow obtained to /oauth2/introspect after completion; only meaningful when the flow is expected to succeed.
+	Introspect []IntrospectCase `json:"introspect"`
+
+	Scopes         []string          `json:"scopes"`
+	UserinfoClaims map[string]any    `json:"userinfo_claims"` // OIDC "claims".userinfo request object
+	ExpectPresent  []string          `json:"expect_present"`
+	ExpectValues   map[string]string `json:"expect_values"`
+	ExpectAbsent   []string          `json:"expect_absent"`
+	// KnownIssue marks the scenario as a tracked environment gap, reported in the Known bucket.
+	KnownIssue string `json:"known_issue"`
+
+	// RequiresCredential names a key (as merged into this scenario's answers,
+	// e.g. "password") that must be non-empty for the scenario to run at all.
+	// Left unconfigured on this deployment, the scenario is reported in the
+	// Skipped bucket instead of attempting a login that has no credential to use.
+	RequiresCredential string `json:"requires_credential"`
+}
+
+// ConsentSpec is a scenario's consent behaviour and expectations.
+type ConsentSpec struct {
+	// Deny withholds approval from these element names (case-insensitive); a name the prompt never offers fails the scenario.
+	Deny []string `json:"deny"`
+	// DenyAll withholds approval from every element offered.
+	DenyAll bool `json:"deny_all"`
+
+	// ExpectPrompt asserts whether a consent step appeared: "yes", "no", or "" for no assertion.
+	ExpectPrompt string `json:"expect_prompt"`
+}
+
+// consentPolicy maps the scenario's spec onto the driver's policy.
+func (c *ConsentSpec) consentPolicy() esignet.ConsentPolicy {
+	if c == nil {
+		return esignet.ConsentPolicy{}
+	}
+	return esignet.ConsentPolicy{Deny: c.Deny, DenyAll: c.DenyAll}
+}
+
+// consentObservation is what the flow actually did about consent, carried back even on login failure.
+type consentObservation struct {
+	prompted bool
+	denied   []string
+}
+
+// assertConsent turns the scenario's consent expectations into report assertions, or nil when the scenario asserts nothing.
+func assertConsent(sc Scenario, obs consentObservation) []result.Assertion {
+	if sc.Consent == nil {
+		return nil
+	}
+	var out []result.Assertion
+
+	switch strings.ToLower(strings.TrimSpace(sc.Consent.ExpectPrompt)) {
+	case "yes":
+		out = append(out, result.Assertion{
+			Field: "consent prompt", Expected: "prompted",
+			Actual: promptedWord(obs.prompted), Passed: obs.prompted,
+		})
+	case "no":
+		out = append(out, result.Assertion{
+			Field: "consent prompt", Expected: "not prompted (stored consent reused)",
+			Actual: promptedWord(obs.prompted), Passed: !obs.prompted,
+		})
+	}
+
+	// Evidence that a scenario's requested withholding actually happened.
+	if len(sc.Consent.Deny) > 0 || sc.Consent.DenyAll {
+		want := "withheld: " + strings.Join(sc.Consent.Deny, ", ")
+		if sc.Consent.DenyAll {
+			want = "withheld: all offered elements"
+		}
+		got := "withheld: " + strings.Join(obs.denied, ", ")
+		if len(obs.denied) == 0 {
+			got = "nothing withheld (no consent step reached)"
+		}
+		out = append(out, result.Assertion{
+			Field: "consent decision", Expected: want, Actual: got, Passed: len(obs.denied) > 0,
+		})
+	}
+	return out
+}
+
+func promptedWord(b bool) string {
+	if b {
+		return "prompted"
+	}
+	return "not prompted"
+}
+
+// Runner drives the E2E surface for one plugin.
+type Runner struct {
+	Base             string // eSignet base, e.g. https://host/v1/esignet
+	Issuer           string
+	AuthEndpoint     string
+	TokenEndpoint    string
+	UserinfoEndpoint string
+	JWKSURI          string
+	// PAREndpoint is discovery's pushed_authorization_request_endpoint; empty blocks the PAR scenarios only.
+	PAREndpoint string
+	// IntrospectEndpoint is discovery's introspection_endpoint (RFC 7662); empty blocks the introspection scenarios only.
+	IntrospectEndpoint string
+	// DPoPAlgs is discovery's dpop_signing_alg_values_supported, narrowed to one alg the harness can produce.
+	DPoPAlgs   []string
+	AdminToken string
+	Plugin     string
+	Answers    map[string]string // base identity answers; Scenario.Credentials overrides per case
+	IDType     string            // uin | vid | phone | email — login-id-type preference, combined with each scenario's AuthFactor
+	TLSVerify  bool
+	Timeout    time.Duration
+	Logf       func(string, ...any)
+	OTP        esignet.OTPProvider // dynamic OTP source; nil for static OTP
+
+	// PMS registration (mosip plugin only).
+	PMSBaseURL    string
+	AuthPartnerID string
+	PolicyID      string
+
+	acr    []string // registered ACRs, set from the spec in Run
+	client *http.Client
+}
+
+func (r *Runner) httpClient() *http.Client {
+	if r.client == nil {
+		r.client = httpx.NewClient(r.TLSVerify, r.Timeout)
+	}
+	return r.client
+}
+
+// requireHTTPS rejects a base URL that would send AdminToken in cleartext, since the client's redirect policy does not strip it on a scheme downgrade.
+func requireHTTPS(label, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("%s must be an absolute https URL, got %q", label, raw)
+	}
+	return nil
+}
+
+// do performs an HTTP call and records it (Authorization redacted) into calls.
+func (r *Runner) do(ctx context.Context, calls *[]result.HTTPCall, label, method, u string, headers map[string]string, body string) (int, []byte, error) {
+	status, rb, _, err := r.doWithHeaders(ctx, calls, label, method, u, headers, body)
+	return status, rb, err
+}
+
+// doWithHeaders is do, additionally returning the response headers, which DPoP needs to read a server-issued DPoP-Nonce.
+func (r *Runner) doWithHeaders(ctx context.Context, calls *[]result.HTTPCall, label, method, u string, headers map[string]string, body string) (int, []byte, http.Header, error) {
+	var rdr io.Reader
+	if body != "" {
+		rdr = bytes.NewBufferString(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, rdr)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := r.httpClient().Do(req)
+	rec := result.HTTPCall{Seq: len(*calls) + 1, At: time.Now().UnixNano(), Label: label, Method: method, URL: u, ReqBody: body, ReqHeaders: redactHeaders(req.Header)}
+	if err != nil {
+		*calls = append(*calls, rec)
+		return 0, nil, nil, err
+	}
+	rb, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	rec.Status = resp.StatusCode
+	rec.RespHeaders = httpx.CloneHeader(resp.Header)
+	rec.RespBody = string(rb)
+	*calls = append(*calls, rec)
+	return resp.StatusCode, rb, resp.Header, nil
+}
+
+// sensitiveHeaders carry credentials that must never reach the archived report; Cookie is included because the PMS admin token travels there.
+var sensitiveHeaders = []string{"Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"}
+
+func redactHeaders(h http.Header) map[string][]string {
+	out := map[string][]string{}
+	for k, v := range h {
+		redacted := false
+		for _, s := range sensitiveHeaders {
+			if strings.EqualFold(k, s) {
+				redacted = true
+				break
+			}
+		}
+		if redacted {
+			out[k] = []string{"***redacted***"}
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// Run registers a throwaway client, executes every scenario against it, and returns one ModuleResult per scenario (Surface=e2e).
+func (r *Runner) Run(ctx context.Context, spec Spec) []result.ModuleResult {
+	logf := r.Logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	var out []result.ModuleResult
+	r.acr = spec.Acr
+
+	if r.AdminToken != "" {
+		// An https URL is worthless cover for the token if the client doesn't
+		// actually validate the certificate on the other end of it.
+		if !r.TLSVerify {
+			return r.registrationFailureRows(spec, nil,
+				errors.New("TLS verification must be enabled when ADMIN_TOKEN is set"))
+		}
+		if err := requireHTTPS("esignet base URL", r.Base); err != nil {
+			return r.registrationFailureRows(spec, nil, err)
+		}
+		if r.PMSBaseURL != "" {
+			if err := requireHTTPS("PMS base URL", r.PMSBaseURL); err != nil {
+				return r.registrationFailureRows(spec, nil, err)
+			}
+		}
+	}
+
+	// Register the clients the scenarios ask for; scenarios sharing a client config share a client, registered on first use.
+	pool := &clientPool{runner: r, spec: spec}
+	var setupCalls []result.HTTPCall
+	if _, err := pool.get(ctx, &setupCalls, ClientConfig{}); err != nil {
+		// Keep every scenario visible in the report rather than collapsing to a single error row.
+		logf("e2e: client registration failed (%v) — reporting %d scenario(s) as blocked", err, len(spec.Scenarios))
+		return r.registrationFailureRows(spec, setupCalls, err)
+	}
+
+	// Run each scenario against the client its config calls for.
+	for _, sc := range spec.Scenarios {
+		start := time.Now()
+		row := result.ModuleResult{Surface: result.SurfaceE2E, Plugin: r.Plugin, Module: sc.Name, HarnessOutcome: result.OutcomeOK}
+
+		if msg := scenarioConfigError(sc); msg != "" {
+			row.Result = "FAILED"
+			row.FailedConditions = []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: "scenario config error: " + msg}}
+			logf("e2e: %-55s -> FAILED (%s)", sc.Name, msg)
+			out = append(out, row)
+			continue
+		}
+
+		cfg := ClientConfig{}
+		if sc.ClientConfig != nil {
+			cfg = *sc.ClientConfig
+		}
+		// A scenario that changes its client's status gets one of its own — see clientPool.dedicated.
+		get := pool.get
+		if sc.ClientLifecycle != nil {
+			get = pool.dedicated
+		}
+		cl, cerr := get(ctx, &setupCalls, cfg)
+		if cerr != nil {
+			// One combination's client failing to register must not stop the rest of the run: report this scenario and carry on.
+			row.Result = "FAILED"
+			row.FailedConditions = []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: fmt.Sprintf("client registration for config %s failed: %v", cfg.label(), cerr)}}
+			row.DurationMs = time.Since(start).Milliseconds()
+			logf("e2e: %-55s -> FAILED (client config %s: %v)", sc.Name, cfg.label(), cerr)
+			out = append(out, row)
+			continue
+		}
+
+		answers := mergeAnswers(r.Answers, sc.Credentials)
+		for _, k := range sc.OmitCredentials {
+			delete(answers, esignet.Normalize(k))
+		}
+
+		if sc.RequiresCredential != "" {
+			// An unrecognised name is a typo in the spec, not an unconfigured
+			// deployment. Skipping it would take the scenario out of the
+			// failure signal on a mistake — exactly what the skip must never
+			// be able to do — so it fails loudly instead.
+			if !esignet.KnownAnswerKey(sc.RequiresCredential) {
+				row.Result = "FAILED"
+				row.FailedConditions = []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: fmt.Sprintf("scenario spec error: requires_credential %q is not a known answer key", sc.RequiresCredential)}}
+				row.DurationMs = time.Since(start).Milliseconds()
+				logf("e2e: %-55s -> FAILED (requires_credential %q is not a known answer key)", sc.Name, sc.RequiresCredential)
+				out = append(out, row)
+				continue
+			}
+			if answers[esignet.Normalize(sc.RequiresCredential)] == "" {
+				row.Result = "SKIPPED"
+				row.HarnessOutcome = result.OutcomeSkippedByHarness
+				row.OutcomeDetail = fmt.Sprintf("%s not configured for this deployment", sc.RequiresCredential)
+				row.DurationMs = time.Since(start).Milliseconds()
+				logf("e2e: %-55s -> SKIPPED (%s not configured)", sc.Name, sc.RequiresCredential)
+				out = append(out, row)
+				continue
+			}
+		}
+
+		preferred := append(esignet.AuthFactorTokens(sc.AuthFactor), esignet.IDTypeTokens(r.IDType)...)
+
+		claims, calls, consentSeen, protoAsserts, ferr := r.runScenario(ctx, cl, spec.RedirectURI, sc, answers, preferred)
+		row.Calls = calls
+		row.DurationMs = time.Since(start).Milliseconds()
+
+		// Consent expectations are asserted on every outcome, including the expected-rejection path.
+		consentAssertions := assertConsent(sc, consentSeen)
+
+		loginField := fmt.Sprintf("login (acr=%s)", sc.AuthFactor)
+		if cfg != (ClientConfig{}) || sc.Flow != nil {
+			// Name the protocol combination in the row, so a failure reads as more than a bare login failure.
+			loginField = fmt.Sprintf("flow (acr=%s, client=%s)", sc.AuthFactor, cfg.label())
+		}
+		if sc.ClientLifecycle != nil {
+			loginField = fmt.Sprintf("flow (acr=%s, client %s)", sc.AuthFactor, sc.ClientLifecycle.label())
+		}
+		switch {
+		case ferr != nil && sc.ExpectLoginFailure:
+			// Negative case: rejection is the expected outcome, provided the consent and echo assertions hold.
+			row.Assertions = append([]result.Assertion{
+				{Field: loginField, Expected: "rejected", Actual: "rejected: " + ferr.Error(), Passed: true},
+			}, consentAssertions...)
+			if want := sc.ExpectErrorContains; want != "" {
+				row.Assertions = append(row.Assertions, result.Assertion{
+					Field: "rejection reason", Expected: "contains " + strconv.Quote(want),
+					Actual: ferr.Error(), Passed: strings.Contains(ferr.Error(), want),
+				})
+			}
+			row.Assertions = append(row.Assertions, protoAsserts...)
+			if conds := failedConditions(row.Assertions); len(conds) > 0 {
+				row.Result = "FAILED"
+				row.FailedConditions = conds
+				logf("e2e: %-55s -> FAILED (login rejected as expected, but %d consent assertion(s) failed)", sc.Name, len(conds))
+				out = append(out, row)
+				continue
+			}
+			row.Result = "PASSED"
+			logf("e2e: %-55s -> PASSED (login correctly rejected: %v)", sc.Name, ferr)
+			out = append(out, row)
+			continue
+		case ferr != nil && !sc.ExpectLoginFailure:
+			// Positive case that couldn't log in — real failure, reported rather than silently skipped.
+			row.Assertions = append([]result.Assertion{
+				{Field: loginField, Expected: "accepted", Actual: "rejected: " + ferr.Error(), Passed: false},
+			}, consentAssertions...)
+			row.Assertions = append(row.Assertions, protoAsserts...)
+			row.Result = "FAILED"
+			row.FailedConditions = []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: ferr.Error()}}
+			// A declared environment gap reports as KNOWN_ISSUE here too, not
+			// only on the claim-assertion path below: a scenario whose gap
+			// prevents login from completing at all (no mock MDS to answer a
+			// biometric capture, say) would otherwise be the one case the
+			// known_issue marker could not cover, and would block the run.
+			if sc.KnownIssue != "" {
+				row.HarnessOutcome = result.OutcomeKnownIssue
+				row.OutcomeDetail = sc.KnownIssue
+				logf("e2e: %-55s -> KNOWN ISSUE (login: %v: %s)", sc.Name, ferr, sc.KnownIssue)
+			} else {
+				logf("e2e: %-55s -> FAILED (login: %v)", sc.Name, ferr)
+			}
+			out = append(out, row)
+			continue
+		case ferr == nil && sc.ExpectLoginFailure:
+			// Negative case whose bad credential was wrongly accepted.
+			row.Assertions = append([]result.Assertion{
+				{Field: loginField, Expected: "rejected", Actual: "accepted", Passed: false},
+			}, consentAssertions...)
+			row.Assertions = append(row.Assertions, protoAsserts...)
+			row.Result = "FAILED"
+			row.FailedConditions = []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: "expected login to be rejected (negative case), but it was accepted"}}
+			logf("e2e: %-55s -> FAILED (expected rejection, login succeeded)", sc.Name)
+			out = append(out, row)
+			continue
+		}
+
+		// Positive case, login succeeded as expected — proceed to claim checks.
+		loginAssertion := result.Assertion{Field: loginField, Expected: "accepted", Actual: "accepted", Passed: true}
+		assertions := append([]result.Assertion{loginAssertion}, consentAssertions...)
+		assertions = append(assertions, protoAsserts...)
+		assertions = append(assertions, assertClaims(sc, claims)...)
+		row.Assertions = assertions
+		conds := failedConditions(assertions)
+		if len(conds) > 0 {
+			row.Result = "FAILED"
+			row.FailedConditions = conds
+			if sc.KnownIssue != "" {
+				row.HarnessOutcome = result.OutcomeKnownIssue
+				row.OutcomeDetail = sc.KnownIssue
+				logf("e2e: %-55s -> KNOWN ISSUE (%d claim assertion(s): %s)", sc.Name, len(conds), sc.KnownIssue)
+			} else {
+				logf("e2e: %-55s -> FAILED (%d claim assertion(s))", sc.Name, len(conds))
+			}
+		} else {
+			row.Result = "PASSED"
+			logf("e2e: %-55s -> PASSED (%d claims verified)", sc.Name, len(sc.ExpectPresent))
+		}
+		out = append(out, row)
+	}
+
+	// The registration call is real eSignet traffic, so it belongs in the report for debugging.
+	attachSetupCalls(out, setupCalls)
+	return out
+}
+
+// attachSetupCalls folds the client-registration call trace into the first scenario's row.
+func attachSetupCalls(out []result.ModuleResult, setupCalls []result.HTTPCall) {
+	if len(out) == 0 || len(setupCalls) == 0 {
+		return
+	}
+	merged := make([]result.HTTPCall, 0, len(setupCalls)+len(out[0].Calls))
+	merged = append(merged, setupCalls...)
+	merged = append(merged, out[0].Calls...)
+	out[0].Calls = result.CollapseCalls(merged)
+}
+
+// mergeAnswers overlays per-scenario credential overrides onto the plugin's base identity answers, normalizing override keys the same way the driver does.
+func mergeAnswers(base, overrides map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+len(overrides))
+	maps.Copy(out, base)
+	for k, v := range overrides {
+		out[esignet.Normalize(k)] = v
+	}
+	return out
+}
+
+// registrationFailureRows turns a registration failure into one report row per scenario.
+func (r *Runner) registrationFailureRows(spec Spec, calls []result.HTTPCall, err error) []result.ModuleResult {
+	if len(spec.Scenarios) == 0 {
+		row := r.errRow("e2e client registration", err)
+		row.Calls = calls
+		return []result.ModuleResult{row}
+	}
+	// A missing PMS setting and a bearer without the role PMS demands both mean the environment is not ready; report NOT_RUN, not red rows.
+	envNotReady := r.Plugin == "mosip" &&
+		(r.PMSBaseURL == "" || r.AuthPartnerID == "" || r.PolicyID == "" || errors.Is(err, errPMSForbidden))
+	out := make([]result.ModuleResult, 0, len(spec.Scenarios))
+	for i, sc := range spec.Scenarios {
+		row := result.ModuleResult{Surface: result.SurfaceE2E, Plugin: r.Plugin, Module: sc.Name}
+		if envNotReady {
+			row.HarnessOutcome = result.OutcomeEnvNotReady
+			row.OutcomeDetail = "client registration unavailable: " + err.Error()
+			row.Status = "NOT_RUN"
+		} else {
+			row.HarnessOutcome = result.OutcomeOK
+			row.Result = "FAILED"
+			row.FailedConditions = []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: "client registration failed: " + err.Error()}}
+		}
+		if i == 0 {
+			row.Calls = calls
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func (r *Runner) errRow(name string, err error) result.ModuleResult {
+	return result.ModuleResult{
+		Surface: result.SurfaceE2E, Plugin: r.Plugin, Module: name,
+		Result: "FAILED", HarnessOutcome: result.OutcomeOK,
+		FailedConditions: []result.Condition{{Src: "e2e", Result: "FAILURE", Msg: err.Error()}},
+	}
+}
+
+// testClient is one registered throwaway client and the key that authenticates it.
+type testClient struct {
+	priv     *rsa.PrivateKey
+	kid      string
+	clientID string
+	cfg      ClientConfig
+}
+
+// clientPool registers one client per distinct ClientConfig, on first use, and hands the same one back for every later scenario with that config.
+
+// Sharing matters beyond saving a call: the order-dependent consent scenarios assert a stored consent is reused, which only holds against one client.
+type clientPool struct {
+	runner  *Runner
+	spec    Spec
+	clients map[string]*testClient
+}
+
+func (p *clientPool) get(ctx context.Context, calls *[]result.HTTPCall, cfg ClientConfig) (*testClient, error) {
+	if cl, ok := p.clients[cfg.key()]; ok {
+		return cl, nil
+	}
+	cl, err := p.register(ctx, calls, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if p.clients == nil {
+		p.clients = map[string]*testClient{}
+	}
+	p.clients[cfg.key()] = cl
+	return cl, nil
+}
+
+// dedicated registers a client for one scenario's exclusive use and never caches it, since a deactivation on a pooled client would silently break every scenario sharing it.
+func (p *clientPool) dedicated(ctx context.Context, calls *[]result.HTTPCall, cfg ClientConfig) (*testClient, error) {
+	return p.register(ctx, calls, cfg)
+}
+
+// register mints a key and registers one new client for cfg.
+func (p *clientPool) register(ctx context.Context, calls *[]result.HTTPCall, cfg ClientConfig) (*testClient, error) {
+	r := p.runner
+	priv, err := generateRSA()
+	if err != nil {
+		return nil, fmt.Errorf("keygen: %w", err)
+	}
+	// Unique per client so two clients registered in the same second cannot collide on the kid or the client id.
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	cl := &testClient{priv: priv, kid: "e2e-" + stamp, cfg: cfg}
+	cl.clientID, err = r.createClient(ctx, calls, cl, "api-e2e-"+stamp, p.spec)
+	if err != nil {
+		return nil, err
+	}
+	if r.Logf != nil {
+		r.Logf("e2e: registered client %s (config: %s)", cl.clientID, cfg.label())
+	}
+	return cl, nil
+}
+
+// createClient registers the test client and returns the effective clientId for the rest of the flow.
+func (r *Runner) createClient(ctx context.Context, calls *[]result.HTTPCall, cl *testClient, requestedID string, spec Spec) (string, error) {
+	if r.Plugin == "mosip" {
+		return r.createClientViaPMS(ctx, calls, cl, spec)
+	}
+	return r.createClientViaClientMgmt(ctx, calls, cl, requestedID, spec)
+}
+
+// createClientViaClientMgmt registers the test client via eSignet client-mgmt (admin bearer token); the harness picks the clientId and it is echoed back.
+func (r *Runner) createClientViaClientMgmt(ctx context.Context, calls *[]result.HTTPCall, cl *testClient, clientID string, spec Spec) (string, error) {
+	request := map[string]any{
+		"clientId":          clientID,
+		"clientName":        "api e2e",
+		"clientNameLangMap": map[string]any{"eng": "api e2e"},
+		"relyingPartyId":    "api-e2e-rp",
+		"logoUri":           "https://example.org/logo.png",
+		"redirectUris":      []string{spec.RedirectURI},
+		"publicKey":         publicJWK(cl.priv, cl.kid),
+		"userClaims":        spec.UserClaims,
+		"authContextRefs":   spec.Acr,
+		"grantTypes":        []string{"authorization_code"},
+		"clientAuthMethods": []string{"private_key_jwt"},
+	}
+	if ac := cl.cfg.additionalConfig(); ac != nil {
+		request["additionalConfig"] = ac
+	}
+	reqBody := map[string]any{
+		"requestTime": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"request":     request,
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal client-mgmt request: %w", err)
+	}
+	status, rb, err := r.do(ctx, calls, "create client", http.MethodPost, r.Base+"/client-mgmt/client",
+		map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + r.AdminToken}, string(body))
+	if err != nil {
+		return "", fmt.Errorf("create client: %w", err)
+	}
+	if code := firstErrorCode(rb); code != "" {
+		return "", fmt.Errorf("create client rejected (HTTP %d): %s", status, code)
+	}
+	if status < 200 || status > 299 {
+		return "", fmt.Errorf("create client failed (HTTP %d): %s", status, snippet(rb))
+	}
+	return clientID, nil
+}
+
+// errPMSForbidden marks the one registration failure that is an environment gap rather than a defect: PMS refused the bearer for lack of a role.
+var errPMSForbidden = errors.New("PMS create client forbidden (KER-ATH-403)")
+
+// createClientViaPMS registers the test client through partner-management-service /oidc-clients — NOT /oauth/client, which IDA then refuses to authenticate (visible only by driving a login); the bearer needs the AUTH_PARTNER realm role, which a client_credentials service account does not carry (KER-ATH-403).
+func (r *Runner) createClientViaPMS(ctx context.Context, calls *[]result.HTTPCall, cl *testClient, spec Spec) (string, error) {
+	if r.PMSBaseURL == "" || r.AuthPartnerID == "" || r.PolicyID == "" {
+		return "", fmt.Errorf("mosip client registration needs PMS_BASE_URL, AUTH_PARTNER_ID and AUTH_POLICY_ID")
+	}
+	request := map[string]any{
+		"name":              "api e2e",
+		"clientNameLangMap": map[string]any{"eng": "api e2e"},
+		"authPartnerId":     r.AuthPartnerID,
+		"policyId":          r.PolicyID,
+		"logoUri":           "https://example.org/logo.png",
+		"redirectUris":      []string{spec.RedirectURI},
+		"publicKey":         publicJWK(cl.priv, cl.kid),
+		"grantTypes":        []string{"authorization_code"},
+		"clientAuthMethods": []string{"private_key_jwt"},
+	}
+	// PMS silently drops additionalConfig on this endpoint (verified: round-tripping a client shows the field simply absent), so it is also sent here in case that ever changes, but the harness does not rely on it landing this way — see the patchAdditionalConfig call below.
+	ac := cl.cfg.additionalConfig()
+	if ac != nil {
+		request["additionalConfig"] = ac
+	}
+	reqBody := map[string]any{
+		// id and version are part of this endpoint's request wrapper, unlike /oauth/client which accepts requestTime alone.
+		"id":          "mosip.pms.create.oidc.client.post",
+		"version":     "1.0",
+		"requestTime": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"metadata":    map[string]any{},
+		"request":     request,
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal PMS request: %w", err)
+	}
+	url := strings.TrimRight(r.PMSBaseURL, "/") + "/oidc-clients"
+	// PMS reads the admin token from a cookie named Authorization and rejects the Bearer header with KER-ATH-401, unlike eSignet's own client-mgmt.
+	status, rb, err := r.do(ctx, calls, "create client (PMS)", http.MethodPost, url,
+		map[string]string{"Content-Type": "application/json", "Cookie": "Authorization=" + r.AdminToken}, string(body))
+	if err != nil {
+		return "", fmt.Errorf("create client via PMS: %w", err)
+	}
+	if code := firstErrorCode(rb); code != "" {
+		// The one rejection worth naming: /oidc-clients alone is gated on the AUTH_PARTNER realm role.
+		if code == "KER-ATH-403" {
+			return "", fmt.Errorf("%w: %s needs the AUTH_PARTNER realm role, "+
+				"which the client_credentials grant for keycloak.client_id does not carry — grant it that role, "+
+				"or point keycloak.client_id at a client that has it", errPMSForbidden, url)
+		}
+		return "", fmt.Errorf("PMS create client rejected (HTTP %d): %s", status, code)
+	}
+	if status < 200 || status > 299 {
+		return "", fmt.Errorf("PMS create client failed (HTTP %d): %s", status, snippet(rb))
+	}
+	var resp struct {
+		Response struct {
+			ClientID string `json:"clientId"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(rb, &resp); err != nil {
+		return "", fmt.Errorf("PMS create client: parse response (HTTP %d): %w", status, err)
+	}
+	if resp.Response.ClientID == "" {
+		return "", fmt.Errorf("PMS create client: no clientId in response (HTTP %d): %s", status, snippet(rb))
+	}
+	if ac != nil {
+		if err := r.patchAdditionalConfig(ctx, calls, resp.Response.ClientID, ac); err != nil {
+			return "", fmt.Errorf("PMS created client %s but the eSignet additionalConfig patch failed: %w", resp.Response.ClientID, err)
+		}
+	}
+	return resp.Response.ClientID, nil
+}
+
+// patchAdditionalConfig sets additionalConfig through eSignet's own client-mgmt PATCH, which the engine actually reads for enforcement. No read-back is possible: ClientResponse.APIResponse() (esignet-service/internal/clientmgmt/model.go) strips every field but clientId and status from every client-mgmt response, additionalConfig included, on create/update/patch/get alike — confirmed live against esdev, not inferred. The protocol scenario this client is registered for is therefore the only real proof the patch took; a 2xx with no error code here is as far as this call itself can verify.
+func (r *Runner) patchAdditionalConfig(ctx context.Context, calls *[]result.HTTPCall, clientID string, ac map[string]any) error {
+	body, err := json.Marshal(map[string]any{
+		"requestTime": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"request":     map[string]any{"additionalConfig": ac},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal additionalConfig patch: %w", err)
+	}
+	status, rb, err := r.do(ctx, calls, "patch additionalConfig", http.MethodPatch, r.Base+"/client-mgmt/client/"+clientID,
+		map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + r.AdminToken}, string(body))
+	if err != nil {
+		return fmt.Errorf("patch additionalConfig: %w", err)
+	}
+	if code := firstErrorCode(rb); code != "" {
+		return fmt.Errorf("patch additionalConfig rejected (HTTP %d): %s", status, code)
+	}
+	if status < 200 || status > 299 {
+		return fmt.Errorf("patch additionalConfig failed (HTTP %d): %s", status, snippet(rb))
+	}
+	return nil
+}
+
+// scenarioConfigError reports why a scenario cannot be run at all, or "" when it is well formed; these are spec-file mistakes, caught before driving the flow.
+func scenarioConfigError(sc Scenario) string {
+	if sc.AuthFactor == "" {
+		return "auth_factor is required (otp|password|bio|kbi)"
+	}
+	// A rejected flow reaches no introspection, and the expected-rejection branch would report PASSED with no introspection call made.
+	if len(sc.Introspect) > 0 && sc.ExpectLoginFailure {
+		return "introspect and expect_login_failure are mutually exclusive — a rejected flow issues no token to introspect"
+	}
+	if msg := sc.ClientLifecycle.validate(); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+// runScenario drives authorize/login/token/userinfo and returns claims, trace and protocol assertions.
+func (r *Runner) runScenario(ctx context.Context, cl *testClient, redirectURI string, sc Scenario, answers map[string]string, preferred []string) (map[string]any, []result.HTTPCall, consentObservation, []result.Assertion, error) {
+	var calls []result.HTTPCall
+	// proto collects the RP-side protocol checks so they land in the report's Validation tab rather than only aborting the run.
+	var proto []result.Assertion
+
+	plan, perr := resolveFlow(cl.cfg, sc.Flow)
+	if perr != nil {
+		return nil, nil, consentObservation{}, proto, perr
+	}
+	// Validated before the flow is driven, so a mistyped selector costs a config error rather than a full login that then cannot be introspected.
+	introspectCases, ierr := resolveIntrospect(sc.Introspect)
+	if ierr != nil {
+		return nil, nil, consentObservation{}, proto, ierr
+	}
+	// One DPoP key for the whole flow: the proof at token must present the same thumbprint the PAR proof bound the auth code to.
+	var dp *dpopSigner
+	if plan.useDPoP {
+		alg, aerr := chooseDPoPAlg(r.DPoPAlgs)
+		if aerr != nil {
+			return nil, nil, consentObservation{}, proto, aerr
+		}
+		var derr error
+		if dp, derr = newDPoPSigner(alg); derr != nil {
+			return nil, nil, consentObservation{}, proto, derr
+		}
+	}
+
+	verifier, challenge := pkce()
+	state := "st-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	nonce := "no-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+
+	// authorize parameters — pushed to /oauth2/par or sent on the authorize URL, depending on the plan, but identical either way.
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("client_id", cl.clientID)
+	q.Set("scope", strings.Join(sc.Scopes, " "))
+	q.Set("redirect_uri", redirectURI)
+	q.Set("state", state)
+	q.Set("nonce", nonce)
+	switch plan.pkce {
+	case pkceS256:
+		q.Set("code_challenge", challenge)
+		q.Set("code_challenge_method", "S256")
+	case pkcePlain:
+		// The verifier itself is the challenge under the plain method, which FAPI2 forbids and eSignet is expected to reject.
+		q.Set("code_challenge", verifier)
+		q.Set("code_challenge_method", "plain")
+	case pkceNone:
+		// No challenge at all: a client with require_pkce must refuse.
+	}
+	if len(r.acrForClaims()) > 0 {
+		q.Set("acr_values", strings.Join(r.acrForClaims(), " "))
+	}
+	if len(sc.UserinfoClaims) > 0 {
+		cj, cerr := json.Marshal(map[string]any{"userinfo": sc.UserinfoClaims})
+		if cerr != nil {
+			return nil, nil, consentObservation{}, proto, fmt.Errorf("marshal claims request: %w", cerr)
+		}
+		q.Set("claims", string(cj))
+	}
+
+	// Status changes are applied here, between building the request and sending it, so the stage name in the spec is literally where it happens.
+	lcAsserts, lcErr := r.applyAt(ctx, &calls, cl, sc.ClientLifecycle, stageBeforeAuthorize)
+	proto = append(proto, lcAsserts...)
+	if lcErr != nil {
+		return nil, calls, consentObservation{}, proto, lcErr
+	}
+
+	// Push the request first when the plan calls for it; per RFC 9126 the authorize URL then carries only client_id and the returned request_uri.
+	authURL := r.AuthEndpoint + "?" + q.Encode()
+	if plan.usePAR {
+		requestURI, aerr, ferr := r.pushAuthorizationRequest(ctx, &calls, cl, q, dp)
+		proto = append(proto, aerr...)
+		if ferr != nil {
+			return nil, calls, consentObservation{}, proto, ferr
+		}
+		authURL = r.AuthEndpoint + "?" + url.Values{
+			"client_id":   {cl.clientID},
+			"request_uri": {requestURI},
+		}.Encode()
+	}
+
+	// login via the shared driver (authorize -> flow/execute -> auth/callback)
+	driver := esignet.New(answers, preferred, r.TLSVerify, r.Timeout)
+	// Kept apart from `preferred`, which also carries auth-factor tokens like "otp" that every id tab's node name contains.
+	driver.UseIDType(esignet.IDTypeTokens(r.IDType))
+	if r.OTP != nil {
+		driver.SetOTPProvider(r.OTP)
+	}
+	driver.SetConsentPolicy(sc.Consent.consentPolicy())
+	fr := driver.Run(ctx, r.Base, authURL)
+	calls = append(calls, fr.Calls...)
+	consentSeen := consentObservation{prompted: fr.ConsentPrompted, denied: fr.ConsentDenied}
+	if !fr.OK() {
+		return nil, calls, consentSeen, proto,
+			fmt.Errorf("login flow failed: %s", firstNonEmpty(fr.Error, "no redirect_uri"))
+	}
+	// state echo: an RP must reject a callback whose state is not the one it sent, otherwise a code from another request is accepted.
+	gotState := stateFromRedirect(fr.RedirectURI)
+	proto = append(proto, result.Assertion{
+		Field: "authorize state echo", Expected: state, Actual: firstNonEmpty(gotState, "(absent)"),
+		Passed: gotState == state,
+	})
+	code, err := codeFromRedirect(fr.RedirectURI, state)
+	if err != nil {
+		return nil, calls, consentSeen, proto, err
+	}
+
+	lcAsserts, lcErr = r.applyAt(ctx, &calls, cl, sc.ClientLifecycle, stageAfterAuthorize)
+	proto = append(proto, lcAsserts...)
+	if lcErr != nil {
+		return nil, calls, consentSeen, proto, lcErr
+	}
+
+	// token exchange (private_key_jwt + PKCE): aud is the ISSUER, which is what eSignet validates against.
+	aud := r.Issuer
+	if aud == "" {
+		aud = r.TokenEndpoint
+	}
+	assertion, err := clientAssertion(cl.priv, cl.kid, cl.clientID, aud)
+	if err != nil {
+		return nil, calls, consentSeen, proto, fmt.Errorf("client assertion: %w", err)
+	}
+	form := url.Values{
+		"grant_type":            {"authorization_code"},
+		"code":                  {code},
+		"redirect_uri":          {redirectURI},
+		"client_id":             {cl.clientID},
+		"client_assertion_type": {clientAssertionTypeJWTBearer},
+		"client_assertion":      {assertion},
+	}
+	// A flow that sent no challenge has no verifier to present.
+	if plan.pkce != pkceNone {
+		form.Set("code_verifier", verifier)
+	}
+
+	// The token proof normally uses the same key as the PAR proof; a mismatch scenario deliberately swaps in a second key to prove binding is enforced.
+	tokenSigner := dp
+	if plan.useDPoP && plan.dpopKeyMismatch {
+		other, oerr := newDPoPSigner(dp.alg)
+		if oerr != nil {
+			return nil, calls, consentSeen, proto, oerr
+		}
+		tokenSigner = other
+	}
+	status, rb, err := r.postWithDPoP(ctx, &calls, "token", r.TokenEndpoint, form.Encode(), tokenSigner, "")
+	if err != nil {
+		return nil, calls, consentSeen, proto, fmt.Errorf("token request: %w", err)
+	}
+	var tok struct {
+		AccessToken string `json:"access_token"`
+		IDToken     string `json:"id_token"`
+		TokenType   string `json:"token_type"`
+		Error       string `json:"error"`
+		ErrorDesc   string `json:"error_description"`
+	}
+	_ = json.Unmarshal(rb, &tok)
+	if tok.AccessToken == "" {
+		return nil, calls, consentSeen, proto, fmt.Errorf("token exchange failed (HTTP %d): %s", status, firstNonEmpty(tok.Error+" "+tok.ErrorDesc, snippet(rb)))
+	}
+	// What the introspection cases submit and are cross-checked against.
+	tk := tokenSet{accessToken: tok.AccessToken, idToken: tok.IDToken}
+	if plan.useDPoP {
+		tk.dpopJKT = tokenSigner.jkt
+	}
+
+	// A DPoP-bound token must be issued as token_type=DPoP, or a Bearer token here would silently undo the binding.
+	if plan.useDPoP {
+		proto = append(proto, result.Assertion{
+			Field: "token_type", Expected: "DPoP",
+			Actual: firstNonEmpty(tok.TokenType, "(absent)"),
+			Passed: strings.EqualFold(tok.TokenType, "DPoP"),
+		})
+		// cnf.jkt is the binding itself — the thumbprint of the key that must prove possession at every resource call.
+		if payload, derr := decodeJWTPayload(tok.AccessToken); derr == nil {
+			got := ""
+			if cnf, ok := payload["cnf"].(map[string]any); ok {
+				got, _ = cnf["jkt"].(string)
+			}
+			proto = append(proto, result.Assertion{
+				Field: "access_token cnf.jkt", Expected: tokenSigner.jkt,
+				Actual: firstNonEmpty(got, "(absent)"), Passed: got == tokenSigner.jkt,
+			})
+		}
+	}
+
+	// nonce echo: OIDC Core 3.1.3.7 requires the ID token to carry back the authorize request's nonce.
+	if tok.IDToken != "" {
+		got := ""
+		if payload, derr := decodeJWTPayload(tok.IDToken); derr == nil {
+			got, _ = payload["nonce"].(string)
+			// The subject the introspection response must agree with.
+			tk.sub, _ = payload["sub"].(string)
+		}
+		proto = append(proto, result.Assertion{
+			Field: "id_token nonce echo", Expected: nonce, Actual: firstNonEmpty(got, "(absent)"),
+			Passed: got == nonce,
+		})
+	}
+
+	lcAsserts, lcErr = r.applyAt(ctx, &calls, cl, sc.ClientLifecycle, stageAfterToken)
+	proto = append(proto, lcAsserts...)
+	if lcErr != nil {
+		return nil, calls, consentSeen, proto, lcErr
+	}
+
+	// userinfo — presented with the DPoP scheme and a proof carrying ath when the token is bound, with Bearer otherwise (a scenario can force Bearer on a bound token to check the resource endpoint honours the binding).
+	uheaders := map[string]string{"Authorization": "Bearer " + tok.AccessToken}
+	usigner := tokenSigner
+	if plan.useDPoP && !plan.bearerAtUserinfo {
+		uheaders["Authorization"] = "DPoP " + tok.AccessToken
+	} else {
+		// Bearer: no proof to sign, and none to retry with a nonce.
+		usigner = nil
+	}
+	ustatus, ub, err := r.getWithDPoP(ctx, &calls, "userinfo", r.UserinfoEndpoint, uheaders, usigner, tok.AccessToken)
+	if err != nil {
+		return nil, calls, consentSeen, proto, fmt.Errorf("userinfo request: %w", err)
+	}
+	// A JSON error body would otherwise parse as a claims map and surface later as a vague "claim X absent" instead of the real HTTP failure.
+	if ustatus < 200 || ustatus > 299 {
+		return nil, calls, consentSeen, proto, fmt.Errorf("userinfo request failed (HTTP %d): %s", ustatus, snippet(ub))
+	}
+	claims, err := parseUserinfo(ctx, ub, r.JWKSURI, r.TLSVerify)
+	if err != nil {
+		return nil, calls, consentSeen, proto, fmt.Errorf("userinfo parse: %w", err)
+	}
+
+	// Introspection runs last, on tokens the flow has just proven usable, so a failure here is the endpoint's, not a stale token's.
+	if len(introspectCases) > 0 {
+		proto = append(proto, r.introspect(ctx, &calls, cl, introspectCases, tk)...)
+	}
+	return claims, calls, consentSeen, proto, nil
+}
+
+// requestURIPrefix is the URN namespace RFC 9126 reserves for PAR request URIs.
+const requestURIPrefix = "urn:ietf:params:oauth:request_uri:"
+
+// pushAuthorizationRequest posts the authorization parameters to /oauth2/par and returns the request_uri to drive authorize with; a DPoP proof sent here is what binds the resulting authorization code to the proof key.
+func (r *Runner) pushAuthorizationRequest(ctx context.Context, calls *[]result.HTTPCall, cl *testClient, params url.Values, dp *dpopSigner) (string, []result.Assertion, error) {
+	if r.PAREndpoint == "" {
+		return "", nil, fmt.Errorf("this scenario requires PAR, but discovery advertises no pushed_authorization_request_endpoint")
+	}
+	aud := r.Issuer
+	if aud == "" {
+		aud = r.PAREndpoint
+	}
+	assertion, err := clientAssertion(cl.priv, cl.kid, cl.clientID, aud)
+	if err != nil {
+		return "", nil, fmt.Errorf("par client assertion: %w", err)
+	}
+	form := url.Values{}
+	maps.Copy(form, params)
+	form.Set("client_assertion_type", clientAssertionTypeJWTBearer)
+	form.Set("client_assertion", assertion)
+	if dp != nil {
+		// dpop_jkt states the binding in the request as well as the proof; the server rejects the pair when they disagree.
+		form.Set("dpop_jkt", dp.jkt)
+	}
+
+	status, rb, err := r.postWithDPoP(ctx, calls, "par", r.PAREndpoint, form.Encode(), dp, "")
+	if err != nil {
+		return "", nil, fmt.Errorf("par request: %w", err)
+	}
+	var resp struct {
+		RequestURI string `json:"request_uri"`
+		ExpiresIn  int64  `json:"expires_in"`
+		Error      string `json:"error"`
+		ErrorDesc  string `json:"error_description"`
+	}
+	_ = json.Unmarshal(rb, &resp)
+	if resp.RequestURI == "" {
+		return "", nil, fmt.Errorf("par failed (HTTP %d): %s", status, firstNonEmpty(resp.Error+" "+resp.ErrorDesc, snippet(rb)))
+	}
+	asserts := []result.Assertion{{
+		Field: "PAR request_uri", Expected: requestURIPrefix + "…",
+		Actual: resp.RequestURI, Passed: strings.HasPrefix(resp.RequestURI, requestURIPrefix),
+	}}
+	return resp.RequestURI, asserts, nil
+}
+
+// postWithDPoP posts a form, attaching a DPoP proof when dp is non-nil, retried exactly once on a use_dpop_nonce handshake.
+func (r *Runner) postWithDPoP(ctx context.Context, calls *[]result.HTTPCall, label, endpoint, body string, dp *dpopSigner, accessToken string) (int, []byte, error) {
+	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
+	if dp == nil {
+		status, rb, err := r.do(ctx, calls, label, http.MethodPost, endpoint, headers, body)
+		return status, rb, err
+	}
+	for attempt := 0; ; attempt++ {
+		proof, err := dp.proof(http.MethodPost, endpoint, accessToken)
+		if err != nil {
+			return 0, nil, fmt.Errorf("%s dpop proof: %w", label, err)
+		}
+		headers["DPoP"] = proof
+		status, rb, respHeaders, err := r.doWithHeaders(ctx, calls, label, http.MethodPost, endpoint, headers, body)
+		if err != nil {
+			return status, rb, err
+		}
+		if attempt == 0 && isDPoPNonceError(rb) && dp.dpopNonceFrom(respHeaders) {
+			continue
+		}
+		return status, rb, nil
+	}
+}
+
+// acrForClaims returns the client's registered ACRs for the authorize request.
+
+// getWithDPoP is postWithDPoP for a resource read, retrying once on a RFC 9449 s8 DPoP-Nonce challenge; dp nil means Bearer, so the call is made once.
+func (r *Runner) getWithDPoP(ctx context.Context, calls *[]result.HTTPCall, label, endpoint string, headers map[string]string, dp *dpopSigner, accessToken string) (int, []byte, error) {
+	if dp == nil {
+		return r.do(ctx, calls, label, http.MethodGet, endpoint, headers, "")
+	}
+	for attempt := 0; ; attempt++ {
+		proof, err := dp.proof(http.MethodGet, endpoint, accessToken)
+		if err != nil {
+			return 0, nil, fmt.Errorf("%s dpop proof: %w", label, err)
+		}
+		headers["DPoP"] = proof
+		status, rb, respHeaders, err := r.doWithHeaders(ctx, calls, label, http.MethodGet, endpoint, headers, "")
+		if err != nil {
+			return status, rb, err
+		}
+		if attempt == 0 && isDPoPNonceError(rb) && dp.dpopNonceFrom(respHeaders) {
+			continue
+		}
+		return status, rb, nil
+	}
+}
+
+func (r *Runner) acrForClaims() []string { return r.acr }

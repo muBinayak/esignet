@@ -13,9 +13,14 @@ import (
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
-// ConsolidatedAuthnProvider extends providers.AuthnProviderManager with OTP send capability.
+// ConsolidatedAuthnProvider extends providers.AuthnProviderInterface with sendOTP capability.
 type ConsolidatedAuthnProvider interface {
-	providers.AuthnProviderManager
+	providers.AuthnProviderInterface
+
+	// SendOTP sends an OTP to the user based on the provided identifiers and metadata.
 	SendOTP(_ context.Context, identifiers map[string]interface{},
 		metadata *providers.AuthnMetadata) (*SendOTPResult, *common.ServiceError)
+
+	// GetSigningCertificates retrieves public keys used by the ID system to sign userinfo responses.
+	GetSigningCertificates(ctx context.Context) ([]CertificateData, *common.ServiceError)
 }

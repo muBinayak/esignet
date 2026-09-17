@@ -9,14 +9,19 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/mosip/esignet/internal/clientmgmt"
 	"github.com/mosip/esignet/internal/clientmgmt/db"
 	"github.com/mosip/esignet/internal/config"
+	"github.com/mosip/esignet/internal/engine/shared"
 )
 
 type stubQuerier struct {
@@ -32,8 +37,28 @@ func (s *stubQuerier) GetClient(_ context.Context, id string) (db.ClientDetail, 
 	return s.client, nil
 }
 
+func (s *stubQuerier) GetActiveClient(_ context.Context, id string) (db.ClientDetail, error) {
+	if !s.found || id != s.client.ID || s.client.Status != "ACTIVE" {
+		return db.ClientDetail{}, sql.ErrNoRows
+	}
+	return s.client, nil
+}
+
+// dbErrorQuerier simulates an infrastructure failure (e.g. connection refused).
+type dbErrorQuerier struct {
+	db.Querier
+}
+
+func (q *dbErrorQuerier) GetClient(_ context.Context, _ string) (db.ClientDetail, error) {
+	return db.ClientDetail{}, errors.New("connection refused")
+}
+
+func (q *dbErrorQuerier) GetActiveClient(_ context.Context, _ string) (db.ClientDetail, error) {
+	return db.ClientDetail{}, errors.New("connection refused")
+}
+
 func newActorTestService(client db.ClientDetail) *clientmgmt.Service {
-	return clientmgmt.NewServiceWithQuerier(&stubQuerier{client: client, found: true}, nil, 0)
+	return clientmgmt.NewServiceWithQuerier(&stubQuerier{client: client, found: true}, nil, 0, nil)
 }
 
 func testClientRow() db.ClientDetail {
@@ -72,9 +97,132 @@ func (ts *ActorProviderTestSuite) TestActorProvider_GetOAuthClientByClientID() {
 		}
 	})
 
-	t.Run("not found", func(t *testing.T) {
-		if _, svcErr := p.GetOAuthClientByClientID(context.Background(), "no-such-client"); svcErr == nil {
-			t.Fatal("expected error for unknown client")
+	t.Run("not found returns nil without error", func(t *testing.T) {
+		client, svcErr := p.GetOAuthClientByClientID(context.Background(), "no-such-client")
+		if svcErr != nil {
+			t.Fatalf("expected nil error for unknown client, got %v", svcErr)
+		}
+		if client != nil {
+			t.Fatalf("expected nil client for unknown client, got %v", client)
+		}
+	})
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetOAuthClientByClientID_JWEUserInfo() {
+	t := ts.T()
+
+	t.Run("JWE with alg propagates encryption alg and fixed enc", func(t *testing.T) {
+		row := testClientRow()
+		row.AdditionalConfig = sql.NullString{String: `{"userinfo_response_type":"JWE"}`, Valid: true}
+		row.EncPublicKey = sql.NullString{String: `{"kty":"RSA","n":"abc","e":"AQAB","alg":"RSA-OAEP-256"}`, Valid: true}
+		svc := newActorTestService(row)
+		p := NewActorProvider(svc, &config.AppConfig{})
+
+		client, svcErr := p.GetOAuthClientByClientID(context.Background(), "client-001")
+		if svcErr != nil {
+			t.Fatalf("GetOAuthClientByClientID: %v", svcErr)
+		}
+		if client.UserInfo.ResponseType != providers.UserInfoResponseTypeNESTEDJWT {
+			t.Errorf("ResponseType = %q, want %q", client.UserInfo.ResponseType, providers.UserInfoResponseTypeNESTEDJWT)
+		}
+		if client.UserInfo.EncryptionAlg != "RSA-OAEP-256" {
+			t.Errorf("EncryptionAlg = %q, want RSA-OAEP-256", client.UserInfo.EncryptionAlg)
+		}
+		if client.UserInfo.EncryptionEnc != encryptionEncA256GCM {
+			t.Errorf("EncryptionEnc = %q, want %q", client.UserInfo.EncryptionEnc, encryptionEncA256GCM)
+		}
+	})
+
+	t.Run("JWE without alg on encryption key is rejected", func(t *testing.T) {
+		row := testClientRow()
+		row.AdditionalConfig = sql.NullString{String: `{"userinfo_response_type":"JWE"}`, Valid: true}
+		row.EncPublicKey = sql.NullString{String: `{"kty":"RSA","n":"abc","e":"AQAB"}`, Valid: true}
+		svc := newActorTestService(row)
+		p := NewActorProvider(svc, &config.AppConfig{})
+
+		_, svcErr := p.GetOAuthClientByClientID(context.Background(), "client-001")
+		if svcErr == nil { //nolint:staticcheck // SA5011 false positive: t.Fatal below exits before the later dereference
+			t.Fatal("expected error for JWE userinfo without an alg on the encryption key")
+		}
+		if svcErr.Code != "missing_encryption_key_alg" { //nolint:staticcheck // SA5011 false positive: t.Fatal above exits before this dereference
+			t.Errorf("error code = %q, want missing_encryption_key_alg", svcErr.Code)
+		}
+	})
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetOAuthClientByClientID_ServerError() {
+	t := ts.T()
+	svc := clientmgmt.NewServiceWithQuerier(&dbErrorQuerier{}, nil, 0, nil)
+	p := NewActorProvider(svc, &config.AppConfig{})
+
+	client, svcErr := p.GetOAuthClientByClientID(context.Background(), "any-client")
+	if client != nil {
+		t.Fatalf("expected nil client on server error, got %v", client)
+	}
+	if svcErr == nil { //nolint:staticcheck // SA5011 false positive: t.Fatal below exits before the later dereference
+		t.Fatal("expected non-nil error on server error")
+	}
+	if svcErr.Type != common.ServerErrorType { //nolint:staticcheck // SA5011 false positive: t.Fatal above exits before this dereference
+		t.Errorf("expected ServerErrorType, got %v", svcErr.Type)
+	}
+	if svcErr.Code != "server_error" {
+		t.Errorf("expected Code \"server_error\", got %q", svcErr.Code)
+	}
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetOAuthClientByClientID_JWEIDToken() {
+	t := ts.T()
+
+	t.Run("default response type is JWT with no encryption", func(t *testing.T) {
+		svc := newActorTestService(testClientRow())
+		p := NewActorProvider(svc, &config.AppConfig{})
+
+		client, svcErr := p.GetOAuthClientByClientID(context.Background(), "client-001")
+		if svcErr != nil {
+			t.Fatalf("GetOAuthClientByClientID: %v", svcErr)
+		}
+		if client.Token.IDToken.ResponseType != providers.IDTokenResponseTypeJWT {
+			t.Errorf("ResponseType = %q, want %q", client.Token.IDToken.ResponseType, providers.IDTokenResponseTypeJWT)
+		}
+		if client.Token.IDToken.EncryptionAlg != "" || client.Token.IDToken.EncryptionEnc != "" {
+			t.Errorf("expected no encryption fields, got %+v", client.Token.IDToken)
+		}
+	})
+
+	t.Run("JWE with alg propagates encryption alg and fixed enc", func(t *testing.T) {
+		row := testClientRow()
+		row.AdditionalConfig = sql.NullString{String: `{"id_token_response_type":"JWE"}`, Valid: true}
+		row.EncPublicKey = sql.NullString{String: `{"kty":"RSA","n":"abc","e":"AQAB","alg":"RSA-OAEP-256"}`, Valid: true}
+		svc := newActorTestService(row)
+		p := NewActorProvider(svc, &config.AppConfig{})
+
+		client, svcErr := p.GetOAuthClientByClientID(context.Background(), "client-001")
+		if svcErr != nil {
+			t.Fatalf("GetOAuthClientByClientID: %v", svcErr)
+		}
+		if client.Token.IDToken.ResponseType != providers.IDTokenResponseTypeNESTEDJWT {
+			t.Errorf("ResponseType = %q, want %q", client.Token.IDToken.ResponseType, providers.IDTokenResponseTypeNESTEDJWT)
+		}
+		if client.Token.IDToken.EncryptionAlg != "RSA-OAEP-256" {
+			t.Errorf("EncryptionAlg = %q, want RSA-OAEP-256", client.Token.IDToken.EncryptionAlg)
+		}
+		if client.Token.IDToken.EncryptionEnc != encryptionEncA256GCM {
+			t.Errorf("EncryptionEnc = %q, want %q", client.Token.IDToken.EncryptionEnc, encryptionEncA256GCM)
+		}
+	})
+
+	t.Run("JWE without alg on encryption key is rejected", func(t *testing.T) {
+		row := testClientRow()
+		row.AdditionalConfig = sql.NullString{String: `{"id_token_response_type":"JWE"}`, Valid: true}
+		row.EncPublicKey = sql.NullString{String: `{"kty":"RSA","n":"abc","e":"AQAB"}`, Valid: true}
+		svc := newActorTestService(row)
+		p := NewActorProvider(svc, &config.AppConfig{})
+
+		_, svcErr := p.GetOAuthClientByClientID(context.Background(), "client-001")
+		if svcErr == nil {
+			t.Fatal("expected error for JWE id_token without an alg on the encryption key")
+		} else if svcErr.Code != "missing_encryption_key_alg" {
+			t.Errorf("error code = %q, want missing_encryption_key_alg", svcErr.Code)
 		}
 	})
 }
@@ -91,9 +239,32 @@ func (ts *ActorProviderTestSuite) TestActorProvider_GetOAuthProfileByID() {
 	if len(profile.Token.AccessToken.UserConfig.Attributes) != 0 {
 		t.Errorf("Attributes = %v, want empty", profile.Token.AccessToken.UserConfig.Attributes)
 	}
+	if profile.Token.IDToken.ResponseType != providers.IDTokenResponseTypeJWT {
+		t.Errorf("ResponseType = %q, want %q", profile.Token.IDToken.ResponseType, providers.IDTokenResponseTypeJWT)
+	}
 
 	if _, svcErr := p.GetOAuthProfileByID(context.Background(), "no-such-client"); svcErr == nil {
 		t.Fatal("expected error for unknown client")
+	}
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetOAuthProfileByID_ServerError() {
+	t := ts.T()
+	svc := clientmgmt.NewServiceWithQuerier(&dbErrorQuerier{}, nil, 0, nil)
+	p := NewActorProvider(svc, &config.AppConfig{})
+
+	profile, svcErr := p.GetOAuthProfileByID(context.Background(), "any-client")
+	if profile != nil {
+		t.Fatalf("expected nil profile on server error, got %v", profile)
+	}
+	if svcErr == nil { //nolint:staticcheck // SA5011 false positive: t.Fatal below exits before the later dereference
+		t.Fatal("expected non-nil error on server error")
+	}
+	if svcErr.Type != common.ServerErrorType { //nolint:staticcheck // SA5011 false positive: t.Fatal above exits before this dereference
+		t.Errorf("expected ServerErrorType, got %v", svcErr.Type)
+	}
+	if svcErr.Code != "server_error" {
+		t.Errorf("expected Code \"server_error\", got %q", svcErr.Code)
 	}
 }
 
@@ -109,8 +280,8 @@ func (ts *ActorProviderTestSuite) TestActorProvider_GetInboundClientByID() {
 	if client.AuthFlowID != "flow-1" || client.ThemeID != "theme-1" || client.LayoutID != "layout-1" {
 		t.Errorf("client = %+v, unexpected flow/theme/layout ids", client)
 	}
-	if client.LoginConsent.ValidityPeriod != 30 {
-		t.Errorf("LoginConsent.ValidityPeriod = %d, want 30", client.LoginConsent.ValidityPeriod)
+	if client.LoginConsent.ValidityPeriod != 30*60 {
+		t.Errorf("LoginConsent.ValidityPeriod = %d, want %d", client.LoginConsent.ValidityPeriod, 30*60)
 	}
 	if client.Properties["name"] != "Test App" {
 		t.Errorf("Properties[name] = %v, want Test App", client.Properties["name"])
@@ -118,6 +289,26 @@ func (ts *ActorProviderTestSuite) TestActorProvider_GetInboundClientByID() {
 
 	if _, svcErr := p.GetInboundClientByID(context.Background(), "no-such-client"); svcErr == nil {
 		t.Fatal("expected error for unknown client")
+	}
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetInboundClientByID_ServerError() {
+	t := ts.T()
+	svc := clientmgmt.NewServiceWithQuerier(&dbErrorQuerier{}, nil, 0, nil)
+	p := NewActorProvider(svc, &config.AppConfig{})
+
+	client, svcErr := p.GetInboundClientByID(context.Background(), "any-client")
+	if client != nil {
+		t.Fatalf("expected nil client on server error, got %v", client)
+	}
+	if svcErr == nil { //nolint:staticcheck // SA5011 false positive: t.Fatal below exits before the later dereference
+		t.Fatal("expected non-nil error on server error")
+	}
+	if svcErr.Type != common.ServerErrorType { //nolint:staticcheck // SA5011 false positive: t.Fatal above exits before this dereference
+		t.Errorf("expected ServerErrorType, got %v", svcErr.Type)
+	}
+	if svcErr.Code != "server_error" {
+		t.Errorf("expected Code \"server_error\", got %q", svcErr.Code)
 	}
 }
 
@@ -143,6 +334,64 @@ func (ts *ActorProviderTestSuite) TestActorProvider_GetActor() {
 
 	if _, svcErr := p.GetActor("no-such-client"); svcErr == nil {
 		t.Fatal("expected error for unknown client")
+	}
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetActor_NameLangMap() {
+	t := ts.T()
+
+	t.Run("no lang map: name stays plain", func(t *testing.T) {
+		p := NewActorProvider(newActorTestService(testClientRow()), &config.AppConfig{})
+		entity, svcErr := p.GetActor("client-001")
+		if svcErr != nil {
+			t.Fatalf("GetActor: %v", svcErr)
+		}
+		var attrs map[string]interface{}
+		if err := json.Unmarshal(entity.SystemAttributes, &attrs); err != nil {
+			t.Fatalf("unmarshal SystemAttributes: %v", err)
+		}
+		if attrs["name"] != "Test App" {
+			t.Errorf("name = %v, want plain \"Test App\"", attrs["name"])
+		}
+	})
+
+	t.Run("lang map present: name becomes an i18n reference", func(t *testing.T) {
+		row := testClientRow()
+		row.Name = `{"@none":"Test App","hin":"टेस्ट ऐप"}`
+		p := NewActorProvider(newActorTestService(row), &config.AppConfig{})
+
+		entity, svcErr := p.GetActor("client-001")
+		if svcErr != nil {
+			t.Fatalf("GetActor: %v", svcErr)
+		}
+		var attrs map[string]interface{}
+		if err := json.Unmarshal(entity.SystemAttributes, &attrs); err != nil {
+			t.Fatalf("unmarshal SystemAttributes: %v", err)
+		}
+		want := "{{t(client:name)}}"
+		if attrs["name"] != want {
+			t.Errorf("name = %v, want %q", attrs["name"], want)
+		}
+	})
+}
+
+func (ts *ActorProviderTestSuite) TestActorProvider_GetActor_ServerError() {
+	t := ts.T()
+	svc := clientmgmt.NewServiceWithQuerier(&dbErrorQuerier{}, nil, 0, nil)
+	p := NewActorProvider(svc, &config.AppConfig{})
+
+	entity, svcErr := p.GetActor("any-client")
+	if entity != nil {
+		t.Fatalf("expected nil entity on server error, got %v", entity)
+	}
+	if svcErr == nil { //nolint:staticcheck // SA5011 false positive: t.Fatal below exits before the later dereference
+		t.Fatal("expected non-nil error on server error")
+	}
+	if svcErr.Type != common.ServerErrorType { //nolint:staticcheck // SA5011 false positive: t.Fatal above exits before this dereference
+		t.Errorf("expected ServerErrorType, got %v", svcErr.Type)
+	}
+	if svcErr.Code != "server_error" {
+		t.Errorf("expected Code \"server_error\", got %q", svcErr.Code)
 	}
 }
 
@@ -231,16 +480,8 @@ func (ts *ActorProviderTestSuite) TestGetAllowedScopes() {
 		}
 	})
 
-	t.Run("accepts []string additional scopes", func(t *testing.T) {
-		additionalConfig := map[string]any{allowedAuthorizationScopes: []string{"custom_scope"}}
-		got := getAllowedScopes(standardScopeClaims, additionalConfig)
-		if got[len(got)-1] != "custom_scope" {
-			t.Errorf("getAllowedScopes() = %v, want last element custom_scope", got)
-		}
-	})
-
 	t.Run("accepts []any additional scopes decoded from JSON", func(t *testing.T) {
-		additionalConfig := map[string]any{allowedAuthorizationScopes: []any{"custom_scope", "other_scope"}}
+		additionalConfig := map[string]any{shared.AllowedAuthorizationScopesKey: []any{"custom_scope", "other_scope"}}
 		got := getAllowedScopes(standardScopeClaims, additionalConfig)
 		if got[len(got)-2] != "custom_scope" || got[len(got)-1] != "other_scope" {
 			t.Errorf("getAllowedScopes() = %v, want trailing [custom_scope other_scope]", got)

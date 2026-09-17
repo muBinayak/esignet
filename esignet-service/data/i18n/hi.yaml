@@ -4,11 +4,11 @@ system:
   "design.resolve.error.app_not_found": एप्लिकेशन नहीं मिला
   "design.resolve.error.app_not_found_description": निर्दिष्ट आईडी वाला एप्लिकेशन मौजूद नहीं है
   "design.resolve.error.invalid_type": अमान्य अनुरोध प्रारूप
-  "design.resolve.error.invalid_type_description": 'type' क्वेरी पैरामीटर आवश्यक है और यह 'APP' या 'OU' होना चाहिए
+  "design.resolve.error.invalid_type_description": '"type" क्वेरी पैरामीटर आवश्यक है और यह "APP" या "OU" होना चाहिए'
   "design.resolve.error.missing_id": अमान्य अनुरोध प्रारूप
-  "design.resolve.error.missing_id_description": 'id' क्वेरी पैरामीटर आवश्यक है
+  "design.resolve.error.missing_id_description": '"id" क्वेरी पैरामीटर आवश्यक है'
   "design.resolve.error.unsupported_type": असमर्थित रिज़ॉल्व प्रकार
-  "design.resolve.error.unsupported_type_description": निर्दिष्ट रिज़ॉल्व प्रकार अभी समर्थित नहीं है। वर्तमान में केवल 'APP' प्रकार समर्थित है
+  "design.resolve.error.unsupported_type_description": निर्दिष्ट रिज़ॉल्व प्रकार अभी समर्थित नहीं है। वर्तमान में केवल \"APP\" प्रकार समर्थित है
   "error.actor_not_found": एक्टर नहीं मिला
   "error.actor_not_found_description": अनुरोधित एक्टर मौजूद नहीं है
   "error.agentservice.agent_already_exists_with_client_id": क्लाइंट ID पहले से उपयोग में है
@@ -25,7 +25,7 @@ system:
   "error.agentservice.cannot_modify_declarative_resource_description": डिक्लेरेटिव रूप से प्रबंधित एजेंटों को API के माध्यम से संशोधित नहीं किया जा सकता
   "error.agentservice.certificate_operation_failed": प्रमाणपत्र ऑपरेशन विफल
   "error.agentservice.certificate_operation_failed_description": अमान्य इनपुट के कारण प्रमाणपत्र ऑपरेशन विफल हो गया
-  "error.agentservice.client_credentials_cannot_use_none_auth_description": client_credentials ग्रांट प्रकार 'none' प्रमाणीकरण विधि का उपयोग नहीं कर सकता
+  "error.agentservice.client_credentials_cannot_use_none_auth_description": client_credentials ग्रांट प्रकार \"none\" प्रमाणीकरण विधि का उपयोग नहीं कर सकता
   "error.agentservice.client_credentials_cannot_use_response_types_description": client_credentials ग्रांट प्रकार को प्रतिक्रिया प्रकारों के साथ उपयोग नहीं किया जा सकता
   "error.agentservice.client_secret_cannot_have_certificate_description": client_secret प्रमाणीकरण विधियों में प्रमाणपत्र नहीं हो सकता
   "error.agentservice.consent_sync_failed": सहमति सिंक विफल
@@ -86,8 +86,8 @@ system:
   "error.agentservice.missing_agent_id_description": एजेंट ID आवश्यक है
   "error.agentservice.multiple_oauth_configs": एकाधिक OAuth इनबाउंड प्रमाणीकरण कॉन्फ़िग अनुमत नहीं हैं
   "error.agentservice.multiple_oauth_configs_description": किसी इकाई में प्रति प्रोटोकॉल अधिकतम एक इनबाउंड प्रमाणीकरण कॉन्फ़िग हो सकता है
-  "error.agentservice.none_auth_method_cannot_have_cert_or_secret_description": 'none' प्रमाणीकरण विधि में प्रमाणपत्र या क्लाइंट सीक्रेट नहीं हो सकता
-  "error.agentservice.none_auth_method_requires_public_client_description": 'none' प्रमाणीकरण विधि के लिए क्लाइंट को पब्लिक क्लाइंट होना आवश्यक है
+  "error.agentservice.none_auth_method_cannot_have_cert_or_secret_description": '"none" प्रमाणीकरण विधि में प्रमाणपत्र या क्लाइंट सीक्रेट नहीं हो सकता'
+  "error.agentservice.none_auth_method_requires_public_client_description": '"none" प्रमाणीकरण विधि के लिए क्लाइंट को पब्लिक क्लाइंट होना आवश्यक है'
   "error.agentservice.organization_unit_not_found": संगठन इकाई नहीं मिली
   "error.agentservice.organization_unit_not_found_description": निर्दिष्ट संगठन इकाई मौजूद नहीं है
   "error.agentservice.owner_not_found": स्वामी नहीं मिला
@@ -96,7 +96,7 @@ system:
   "error.agentservice.private_key_jwt_cannot_have_client_secret_description": private_key_jwt प्रमाणीकरण विधि में क्लाइंट सीक्रेट नहीं हो सकता
   "error.agentservice.private_key_jwt_requires_certificate_description": private_key_jwt प्रमाणीकरण विधि के लिए एक प्रमाणपत्र आवश्यक है
   "error.agentservice.public_client_must_have_pkce_description": पब्लिक क्लाइंट के लिए PKCE आवश्यक true पर सेट होना चाहिए
-  "error.agentservice.public_client_must_use_none_auth_description": पब्लिक क्लाइंट को टोकन एंडपॉइंट प्रमाणीकरण विधि के रूप में 'none' का उपयोग करना चाहिए
+  "error.agentservice.public_client_must_use_none_auth_description": पब्लिक क्लाइंट को टोकन एंडपॉइंट प्रमाणीकरण विधि के रूप में \"none\" का उपयोग करना चाहिए
   "error.agentservice.redirect_uri_fragment_not_allowed_description": Redirect URI में फ्रैगमेंट घटक नहीं होना चाहिए
   "error.agentservice.refresh_token_cannot_be_sole_grant_description": refresh_token ग्रांट प्रकार का उपयोग किसी अन्य ग्रांट प्रकार के बिना नहीं किया जा सकता
   "error.agentservice.response_types_require_authorization_code_description": प्रतिक्रिया प्रकार केवल authorization_code ग्रांट प्रकार के साथ कॉन्फ़िगर किए जा सकते हैं
@@ -130,7 +130,7 @@ system:
   "error.applicationservice.cannot_modify_declarative_resource_description": एप्लिकेशन डिक्लेरेटिव है और इसे संशोधित या हटाया नहीं जा सकता
   "error.applicationservice.certificate_operation_failed": प्रमाणपत्र ऑपरेशन विफल
   "error.applicationservice.certificate_operation_failed_description": एप्लिकेशन प्रमाणपत्र संसाधित करते समय एक त्रुटि हुई
-  "error.applicationservice.client_credentials_cannot_use_none_auth_description": client_credentials ग्रांट प्रकार 'none' प्रमाणीकरण विधि का उपयोग नहीं कर सकता
+  "error.applicationservice.client_credentials_cannot_use_none_auth_description": client_credentials ग्रांट प्रकार \"none\" प्रमाणीकरण विधि का उपयोग नहीं कर सकता
   "error.applicationservice.client_credentials_cannot_use_response_types_description": client_credentials ग्रांट प्रकार को प्रतिक्रिया प्रकारों के साथ उपयोग नहीं किया जा सकता
   "error.applicationservice.client_secret_cannot_have_certificate_description": client_secret प्रमाणीकरण विधियों में प्रमाणपत्र नहीं हो सकता
   "error.applicationservice.consent_service_not_enabled": सहमति सेवा सक्षम नहीं है
@@ -170,7 +170,7 @@ system:
   "error.applicationservice.invalid_jwks_uri": अमान्य JWKS URI
   "error.applicationservice.invalid_jwks_uri_description": प्रदान किया गया JWKS URI एक मान्य URI नहीं है
   "error.applicationservice.invalid_jwks_uri_scheme": अमान्य JWKS URI स्कीम
-  "error.applicationservice.invalid_jwks_uri_scheme_description": 'jwks_uri' को HTTPS स्कीम का उपयोग करना चाहिए
+  "error.applicationservice.invalid_jwks_uri_scheme_description": '"jwks_uri" को HTTPS स्कीम का उपयोग करना चाहिए'
   "error.applicationservice.invalid_logo_url": अमान्य लोगो URL
   "error.applicationservice.invalid_logo_url_description": प्रदान किया गया लोगो URL एक मान्य URI नहीं है
   "error.applicationservice.invalid_oauth_configuration": अमान्य OAuth कॉन्फ़िगरेशन
@@ -197,13 +197,13 @@ system:
   "error.applicationservice.layout_not_found_description": निर्दिष्ट लेआउट कॉन्फ़िगरेशन मौजूद नहीं है
   "error.applicationservice.multiple_oauth_configs": एकाधिक OAuth इनबाउंड प्रमाणीकरण कॉन्फ़िग अनुमत नहीं हैं
   "error.applicationservice.multiple_oauth_configs_description": किसी एप्लिकेशन में प्रति प्रोटोकॉल अधिकतम एक इनबाउंड प्रमाणीकरण कॉन्फ़िग हो सकता है
-  "error.applicationservice.none_auth_method_cannot_have_cert_or_secret_description": 'none' प्रमाणीकरण विधि में प्रमाणपत्र या क्लाइंट सीक्रेट नहीं हो सकता
-  "error.applicationservice.none_auth_method_requires_public_client_description": 'none' प्रमाणीकरण विधि के लिए क्लाइंट को पब्लिक क्लाइंट होना आवश्यक है
+  "error.applicationservice.none_auth_method_cannot_have_cert_or_secret_description": '"none" प्रमाणीकरण विधि में प्रमाणपत्र या क्लाइंट सीक्रेट नहीं हो सकता'
+  "error.applicationservice.none_auth_method_requires_public_client_description": '"none" प्रमाणीकरण विधि के लिए क्लाइंट को पब्लिक क्लाइंट होना आवश्यक है'
   "error.applicationservice.pkce_requires_authorization_code_description": PKCE केवल तब सक्षम किया जा सकता है जब authorization_code ग्रांट प्रकार चुना गया हो
   "error.applicationservice.private_key_jwt_cannot_have_client_secret_description": private_key_jwt प्रमाणीकरण विधि में क्लाइंट सीक्रेट नहीं हो सकता
   "error.applicationservice.private_key_jwt_requires_certificate_description": private_key_jwt प्रमाणीकरण विधि के लिए एक प्रमाणपत्र आवश्यक है
   "error.applicationservice.public_client_must_have_pkce_description": पब्लिक क्लाइंट के लिए PKCE आवश्यक true पर सेट होना चाहिए
-  "error.applicationservice.public_client_must_use_none_auth_description": पब्लिक क्लाइंट को टोकन एंडपॉइंट प्रमाणीकरण विधि के रूप में 'none' का उपयोग करना चाहिए
+  "error.applicationservice.public_client_must_use_none_auth_description": पब्लिक क्लाइंट को टोकन एंडपॉइंट प्रमाणीकरण विधि के रूप में \"none\" का उपयोग करना चाहिए
   "error.applicationservice.redirect_uri_fragment_not_allowed_description": Redirect URI में फ्रैगमेंट घटक नहीं होना चाहिए
   "error.applicationservice.refresh_token_cannot_be_sole_grant_description": refresh_token ग्रांट प्रकार का उपयोग किसी अन्य ग्रांट प्रकार के बिना नहीं किया जा सकता
   "error.applicationservice.response_types_require_authorization_code_description": प्रतिक्रिया प्रकार केवल authorization_code ग्रांट प्रकार के साथ कॉन्फ़िगर किए जा सकते हैं
@@ -429,7 +429,7 @@ system:
   "error.dcr.invalid_request_format": अमान्य अनुरोध प्रारूप
   "error.dcr.invalid_request_format_description": अनुरोध बॉडी अनुपस्थित है या अमान्य प्रारूप में है
   "error.dcr.jwks_configuration_conflict": JWKS कॉन्फ़िगरेशन विरोध
-  "error.dcr.jwks_configuration_conflict_description": 'jwks' और 'jwks_uri' दोनों पैरामीटर एक साथ निर्दिष्ट नहीं किए जा सकते
+  "error.dcr.jwks_configuration_conflict_description": '"jwks" और "jwks_uri" दोनों पैरामीटर एक साथ निर्दिष्ट नहीं किए जा सकते'
   "error.dcr.server_error": सर्वर त्रुटि
   "error.dcr.server_error_description": अनुरोध संसाधित करते समय एक अप्रत्याशित त्रुटि हुई
   "error.dcr.unauthorized": अनधिकृत
@@ -528,11 +528,11 @@ system:
   "error.flowmetaservice.application_not_found_description": निर्दिष्ट एप्लिकेशन मौजूद नहीं है
   "error.flowmetaservice.internal_server_error": आंतरिक सर्वर त्रुटि
   "error.flowmetaservice.invalid_request": अमान्य अनुरोध
-  "error.flowmetaservice.invalid_type_description": 'type' पैरामीटर 'APP' या 'OU' होना चाहिए
-  "error.flowmetaservice.missing_id_description": 'id' क्वेरी पैरामीटर आवश्यक है
+  "error.flowmetaservice.invalid_type_description": '"type" पैरामीटर "APP" या "OU" होना चाहिए'
+  "error.flowmetaservice.missing_id_description": '"id" क्वेरी पैरामीटर आवश्यक है'
   "error.flowmetaservice.missing_id_parameter": आवश्यक पैरामीटर अनुपस्थित है
   "error.flowmetaservice.missing_required_parameter": आवश्यक पैरामीटर अनुपस्थित है
-  "error.flowmetaservice.missing_type_description": 'type' क्वेरी पैरामीटर आवश्यक है
+  "error.flowmetaservice.missing_type_description": '"type" क्वेरी पैरामीटर आवश्यक है'
   "error.flowmetaservice.ou_fetch_failed": आंतरिक सर्वर त्रुटि
   "error.flowmetaservice.ou_fetch_failed_description": संगठन इकाई जानकारी प्राप्त करने में विफल
   "error.flowmetaservice.ou_not_found": संसाधन नहीं मिला
@@ -600,7 +600,7 @@ system:
   "error.groupservice.invalid_member_id": अमान्य सदस्य ID
   "error.groupservice.invalid_member_id_description": अनुरोध में एक या अधिक उपयोगकर्ता या app सदस्य ID मौजूद नहीं हैं या दावा किए गए प्रकार से मेल नहीं खाते
   "error.groupservice.invalid_member_type": अमान्य सदस्य प्रकार
-  "error.groupservice.invalid_member_type_description": सदस्य प्रकार 'user', 'group' या 'app' होना चाहिए
+  "error.groupservice.invalid_member_type_description": सदस्य प्रकार \"user\", \"group\" या \"APP\" होना चाहिए
   "error.groupservice.invalid_offset_parameter": अमान्य ऑफसेट पैरामीटर
   "error.groupservice.invalid_offset_parameter_description": ऑफसेट पैरामीटर एक गैर-ऋणात्मक पूर्णांक होना चाहिए
   "error.groupservice.invalid_ou_id": अमान्य OU ID
@@ -754,7 +754,7 @@ system:
   "error.ouservice.circular_dependency_detected": परिपत्र निर्भरता पाई गई
   "error.ouservice.circular_dependency_detected_description": इस मूल को सेट करने से परिपत्र निर्भरता बन जाएगी
   "error.ouservice.invalid_filter": अमान्य फ़िल्टर पैरामीटर
-  "error.ouservice.invalid_filter_description": "फ़िल्टर पैरामीटर अमान्य है। प्रारूप का उपयोग करें: attribute (eq|gt|lt) \"value\""
+  "error.ouservice.invalid_filter_description": 'फ़िल्टर पैरामीटर अमान्य है। प्रारूप का उपयोग करें: attribute (eq|gt|lt) "value"'
   "error.ouservice.invalid_handle_path": अमान्य हैंडल पाथ
   "error.ouservice.invalid_handle_path_description": निर्दिष्ट हैंडल पाथ मौजूद नहीं है
   "error.ouservice.invalid_limit_parameter": अमान्य लिमिट पैरामीटर
@@ -868,7 +868,7 @@ system:
   "error.roleservice.empty_assignments_list": खाली असाइनमेंट सूची
   "error.roleservice.empty_assignments_list_description": कम से कम एक असाइनमेंट प्रदान किया जाना चाहिए
   "error.roleservice.invalid_assignee_type": अमान्य असाइनी प्रकार
-  "error.roleservice.invalid_assignee_type_description": type पैरामीटर 'user', 'group' या 'app' होना चाहिए
+  "error.roleservice.invalid_assignee_type_description": type पैरामीटर \"user\", \"group\" या \"APP\" होना चाहिए
   "error.roleservice.invalid_assignment_id": अमान्य असाइनमेंट ID
   "error.roleservice.invalid_assignment_id_description": अनुरोध में एक या अधिक असाइनमेंट ID मौजूद नहीं हैं या दावा किए गए प्रकार से मेल नहीं खाते
   "error.roleservice.invalid_limit_parameter": अमान्य लिमिट पैरामीटर
@@ -1187,3 +1187,127 @@ system:
   "theme.error.not_found": थीम नहीं मिली
   "theme.error.not_found_description": अनुरोधित थीम कॉन्फ़िगरेशन नहीं मिली
   "theme.error.result_limit_exceeded": परिणाम सीमा पार हो गई
+  "theme.error.result_limit_exceeded_description": कंपोजिट मोड में थीम की कुल संख्या अधिकतम अनुमत सीमा से अधिक है
+
+header:
+  login_heading: लॉगिन
+  login_subheading: लॉगिन के लिए प्रमाणीकरण का अनुरोध कर रहा है
+  select_login_id: लॉगिन आईडी विकल्प चुनें
+  select_login_mode: लॉगिन का पसंदीदा तरीका चुनें
+
+input:
+  uin_label: यूआईएन/वीआईडी
+  uin_placeholder: अपना यूआईएन/वीआईडी दर्ज करें
+  policy_number_label: पॉलिसी नंबर
+  policy_number_placeholder: अपना पॉलिसी नंबर दर्ज करें
+  mobile_label: मोबाइल नंबर
+  mobile_placeholder: मोबाइल नंबर दर्ज करें
+  email_label: ईमेल
+  email_placeholder: ईमेल आईडी दर्ज करें
+  nrc_label: एनआरसी आईडी
+  nrc_placeholder: एनआरसी आईडी दर्ज करें
+  password_label: पासवर्ड
+  password_placeholder: अपना पासवर्ड दर्ज करें
+  username_label: उपयोगकर्ता नाम
+  username_placeholder: अपना उपयोगकर्ता नाम दर्ज करें
+  fullname_label: पूरा नाम
+  fullname_placeholder: अपना पूरा नाम दर्ज करें
+  dob_label: जन्म तिथि
+  dob_placeholder: अपनी जन्म तिथि चुनें
+
+button:
+  continue: जारी रखें
+  login: लॉगिन
+  verify: सत्यापित करें
+  get_otp: ओटीपी प्राप्त करें
+  login_otp: ओटीपी से लॉगिन करें
+  login_password: पासवर्ड से लॉगिन करें
+  login_biometrics: बायोमेट्रिक्स से लॉगिन करें
+  login_kbi: केबीआई से लॉगिन करें
+  login_id_uin: यूआईएन/वीआईडी
+  login_id_mobile: मोबाइल नंबर
+  login_id_email: ईमेल
+  login_id_nrc: एनआरसी आईडी
+
+otp:
+  enter_otp_title: ओटीपी दर्ज करें
+  otp_sent_msg: कृपया अपने पंजीकृत संपर्क पर भेजा गया 6 अंकों का ओटीपी दर्ज करें
+  resend_otp: ओटीपी पुनः भेजें
+
+biometric:
+  title: अपनी बायोमेट्रिक्स प्रदान करें
+
+consent:
+  title: "निम्नलिखित तक पहुंच का अनुरोध कर रहा है:"
+  description: यह ऐप निम्नलिखित जानकारी तक पहुंचना चाहता है। कृपया समीक्षा करें और चुनें कि आप क्या साझा करना चाहते हैं।
+  allow: अनुमति दें
+  deny: अस्वीकार करें
+  timer_label: कृपया उचित कार्रवाई करें
+  essential_claims: आवश्यक जानकारी
+  optional_claims: स्वैच्छिक जानकारी
+  authorize_scope: दायरे अधिकृत करें
+  essential_claims.info: सेवा प्रदाता द्वारा आवश्यक अनिवार्य उपयोगकर्ता जानकारी
+  optional_claims.info: अतिरिक्त उपयोगकर्ता जानकारी जिसे निवासी सेवा प्रदाता के साथ साझा करना चुन सकता है
+  authorize_scope.info: सेवा प्रदाता को आपकी ओर से इन संरक्षित सेवाओं तक पहुंचने की अनुमति देता है
+  name: पूरा नाम
+  given_name: नाम
+  middle_name: मध्य नाम
+  phone: फ़ोन
+  phone_number: फ़ोन नंबर
+  phone_number_verified: फ़ोन नंबर सत्यापित
+  email: ईमेल पता
+  email_verified: ईमेल पता सत्यापित
+  address: पता
+  birthdate: जन्मतिथि
+  gender: लिंग
+  picture: तस्वीर
+  preferred_username: पसंदीदा उपयोगकर्ता नाम
+  locale: स्थान/भाषा सेटिंग
+  nickname: उपनाम
+  family_name: उपनाम (परिवार)
+  zoneinfo: समय क्षेत्र
+  profile: प्रोफ़ाइल
+  required: आवश्यक
+
+signin:
+  images.app_logo.alt: एप्लिकेशन लोगो
+
+validation:
+  uin.numeric: यूआईएन/वीआईडी में केवल संख्याएं होनी चाहिए
+  uin.length: यूआईएन/वीआईडी 10 से 16 अंकों के बीच होना चाहिए
+  mobile.numeric: मोबाइल नंबर में केवल संख्याएं होनी चाहिए
+  mobile.length: मोबाइल नंबर 9 से 11 अंकों के बीच होना चाहिए
+  email.format: कृपया एक मान्य ईमेल पता दर्ज करें
+  pattern.invalid: अमान्य प्रारूप
+  minLength.invalid: मान बहुत छोटा है
+  maxLength.invalid: मान बहुत लंबा है
+  policy.numeric: पॉलिसी नंबर में केवल संख्याएँ होनी चाहिए
+  policy.length: पॉलिसी नंबर 8 से 50 अंकों के बीच होना चाहिए
+
+validations:
+  required.field.error: यह फ़ील्ड आवश्यक है
+
+errors:
+  heading: त्रुटि
+  signin.initialization: साइन-इन प्रारंभ करने में असमर्थ। कृपया पुनः प्रयास करें।
+  network.unavailable: नेटवर्क अनुपलब्ध। कृपया अपना कनेक्शन जांचें।
+  something_went_wrong: कुछ गलत हो गया
+  unexpected_error: एक अप्रत्याशित त्रुटि हुई। कृपया बाद में पुनः प्रयास करें।
+  page_not_found: पृष्ठ नहीं मिला
+
+messages:
+  loading.placeholder: लोड हो रहा है...
+
+app:
+  footer.powered_by: द्वारा संचालित
+  network_error.title: इंटरनेट कनेक्शन नहीं है
+  network_error.description: कृपया अपना नेटवर्क कनेक्शन जांचें और पुनः प्रयास करें।
+  network_error.try_again: पुनः प्रयास करें
+  otp.resend_timer: आप OTP पुनः भेज सकते हैं
+  otp.timed_out: समय समाप्त
+  otp.submit: सबमिट करें
+  back: पीछे
+  esignet_details: ईसिग्नेट विवरण
+
+captcha:
+  config.error: CAPTCHA प्रदाता कॉन्फ़िगरेशन अमान्य है।

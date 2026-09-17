@@ -19,8 +19,11 @@ import (
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
-// redisClient is the minimal Redis API needed by redisStore.
+// redisClient is the minimal Redis API needed by redisStore. It embeds redis.Scripter so
+// compareFieldAndSwapScript.Run can be passed a redisClient directly.
 type redisClient interface {
+	redis.Scripter
+
 	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
 	Get(ctx context.Context, key string) *redis.StringCmd
 	SetArgs(ctx context.Context, key string, value any, a redis.SetArgs) *redis.StatusCmd
@@ -28,6 +31,19 @@ type redisClient interface {
 	GetDel(ctx context.Context, key string) *redis.StringCmd
 	Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
 }
+
+// compareFieldAndSwapScript atomically replaces the stored value with a new one only when the
+// top-level JSON string field named ARGV[1] equals ARGV[2], preserving the existing TTL.
+// Returns 1 on swap, 0 when the key is absent or the field differs.
+var compareFieldAndSwapScript = redis.NewScript(`
+local val = redis.call('GET', KEYS[1])
+if not val then return 0 end
+local data = cjson.decode(val)
+if type(data) ~= 'table' then return 0 end
+if data[ARGV[1]] ~= ARGV[2] then return 0 end
+redis.call('SET', KEYS[1], ARGV[3], 'KEEPTTL')
+return 1
+`)
 
 // keyFormat is the format string used to build Redis store keys.
 const keyFormat = "%s:runtime:%s:%s:%s"
@@ -60,8 +76,31 @@ func (r *redisStore) Put(ctx context.Context, namespace providers.RuntimeStoreNa
 		return fmt.Errorf("failed to store in Redis: %w", err)
 	}
 
-	r.logger.Debug("Stored in Redis", applog.String("key", key))
+	r.logger.Debug(ctx, "Stored in Redis", applog.String("key", key))
 	return nil
+}
+
+// PutIfNotExists atomically stores a value only if the key does not already hold a value, using
+// Redis's native SET NX.
+func (r *redisStore) PutIfNotExists(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key string, value []byte, ttlSeconds int64) (bool, error) {
+	ttl := time.Duration(0)
+	if ttlSeconds > 0 {
+		ttl = time.Duration(ttlSeconds) * time.Second
+	}
+	ok, err := r.client.SetArgs(ctx, r.getFormattedKey(namespace, key), value, redis.SetArgs{
+		Mode: "NX",
+		TTL:  ttl,
+	}).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to store in Redis: %w", err)
+	}
+
+	r.logger.Debug(ctx, "Stored in Redis", applog.String("key", key))
+	return ok == "OK", nil
 }
 
 // Get retrieves a value from the Redis store by its key.
@@ -114,7 +153,7 @@ func (r *redisStore) Take(ctx context.Context, namespace providers.RuntimeStoreN
 		return nil, fmt.Errorf("failed to take data from Redis: %w", err)
 	}
 
-	r.logger.Debug("Taken from Redis", applog.String("key", key))
+	r.logger.Debug(ctx, "Taken from Redis", applog.String("key", key))
 	return data, nil
 }
 
@@ -131,6 +170,21 @@ func (r *redisStore) ExtendTTL(ctx context.Context, namespace providers.RuntimeS
 		return providers.ErrRuntimeStoreKeyNotFound
 	}
 	return nil
+}
+
+// CompareFieldAndSwap replaces the stored value with newValue only when the top-level JSON string
+// field of the current value equals expected, preserving the existing TTL.
+func (r *redisStore) CompareFieldAndSwap(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key, field, expected string, newValue []byte) (bool, error) {
+	n, err := compareFieldAndSwapScript.Run(ctx, r.client,
+		[]string{r.getFormattedKey(namespace, key)}, field, expected, newValue).Int64()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to compare-and-swap in Redis: %w", err)
+	}
+	return n == 1, nil
 }
 
 // getFormattedKey builds the Redis key.

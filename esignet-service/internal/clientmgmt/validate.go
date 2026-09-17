@@ -38,7 +38,10 @@ var allowedACROIDCPut = map[string]struct{}{
 }
 
 // ValidateCreate validates a create request for the given API profile.
-func ValidateCreate(profile Profile, req CreateClientRequest) error {
+// supportedEncAlgs restricts req.EncPublicKey's alg to the runtime crypto
+// provider's supported encryption algorithms; pass nil/empty to skip that
+// restriction.
+func ValidateCreate(profile Profile, req CreateClientRequest, supportedEncAlgs []string) error {
 	if profile == ProfileOIDC {
 		if req.ClientNameLangMap != nil {
 			return validationErr("invalid_input")
@@ -111,7 +114,7 @@ func ValidateCreate(profile Profile, req CreateClientRequest) error {
 		}
 	}
 	if len(req.EncPublicKey) > 0 {
-		if err := validateJWK(req.EncPublicKey); err != nil {
+		if err := validateEncJWK(req.EncPublicKey, supportedEncAlgs); err != nil {
 			return err
 		}
 	}
@@ -193,7 +196,10 @@ func ValidateUpdate(profile Profile, req UpdateClientRequest) error {
 }
 
 // ValidatePatch validates a merged client state after applying PATCH fields.
-func ValidatePatch(profile Profile, merged UpdateClientRequest, fields PatchFields, encPublicKey NullableJWK) error {
+// supportedEncAlgs restricts encPublicKey's alg to the runtime crypto
+// provider's supported encryption algorithms; pass nil/empty to skip that
+// restriction.
+func ValidatePatch(profile Profile, merged UpdateClientRequest, fields PatchFields, encPublicKey NullableJWK, supportedEncAlgs []string) error {
 	if fields.ClientName {
 		if err := validateClientName(merged.ClientName); err != nil {
 			return err
@@ -245,7 +251,7 @@ func ValidatePatch(profile Profile, merged UpdateClientRequest, fields PatchFiel
 		}
 	}
 	if fields.EncPublicKey && !encPublicKey.IsNull {
-		if err := validateJWK(encPublicKey.Value); err != nil {
+		if err := validateEncJWK(encPublicKey.Value, supportedEncAlgs); err != nil {
 			return err
 		}
 	}
@@ -475,12 +481,36 @@ func isAlpha(s string) bool {
 	return true
 }
 
+var allowedAdditionalConfigKeys = map[string]struct{}{
+	"userinfo_response_type":                {},
+	"id_token_response_type":                {},
+	"consent_expire_in_mins":                {},
+	"signup_banner_required":                {},
+	"forgot_pwd_link_required":              {},
+	"require_pushed_authorization_requests": {},
+	"dpop_bound_access_tokens":              {},
+	"require_pkce":                          {},
+	"purpose":                               {},
+	"allowed_authorization_scopes":          {},
+}
+
 func validateAdditionalConfig(raw json.RawMessage) error {
 	var cfg map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return validationErr("invalid_additional_config")
 	}
+	for key := range cfg {
+		if _, ok := allowedAdditionalConfigKeys[key]; !ok {
+			return validationErr("invalid_additional_config")
+		}
+	}
 	if v, ok := cfg["userinfo_response_type"]; ok {
+		var rt string
+		if err := json.Unmarshal(v, &rt); err != nil || (rt != "JWS" && rt != "JWE") {
+			return validationErr("invalid_additional_config")
+		}
+	}
+	if v, ok := cfg["id_token_response_type"]; ok {
 		var rt string
 		if err := json.Unmarshal(v, &rt); err != nil || (rt != "JWS" && rt != "JWE") {
 			return validationErr("invalid_additional_config")
@@ -492,7 +522,7 @@ func validateAdditionalConfig(raw json.RawMessage) error {
 			return validationErr("invalid_additional_config")
 		}
 	}
-	for _, key := range []string{"signup_banner_required", "forgot_pwd_link_required", "require_pushed_authorization_requests", "dpop_bound_access_tokens"} {
+	for _, key := range []string{"signup_banner_required", "forgot_pwd_link_required", "require_pushed_authorization_requests", "dpop_bound_access_tokens", "require_pkce"} {
 		if v, ok := cfg[key]; ok {
 			var b bool
 			if err := json.Unmarshal(v, &b); err != nil {
@@ -503,6 +533,29 @@ func validateAdditionalConfig(raw json.RawMessage) error {
 	if v, ok := cfg["purpose"]; ok {
 		if err := validatePurpose(v); err != nil {
 			return err
+		}
+	}
+	if v, ok := cfg["allowed_authorization_scopes"]; ok {
+		if err := validateAllowedAuthorizationScopes(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAllowedAuthorizationScopes validates the allowed_authorization_scopes
+// additional_config value: an array of unique, non-blank scope names.
+func validateAllowedAuthorizationScopes(raw json.RawMessage) error {
+	var scopes []string
+	if err := json.Unmarshal(raw, &scopes); err != nil {
+		return validationErr("invalid_additional_config")
+	}
+	if !hasUniqueStrings(scopes) {
+		return validationErr("invalid_additional_config")
+	}
+	for _, s := range scopes {
+		if strings.TrimSpace(s) == "" {
+			return validationErr("invalid_additional_config")
 		}
 	}
 	return nil

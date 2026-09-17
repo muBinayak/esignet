@@ -19,11 +19,17 @@ internal/engine/             Thunder engine providers/executors
   sunbird/                   SunbirdRC KBI authn provider
   runtimestores/             Redis-backed flow/session/PAR stores
   shared/                    Code shared across engine providers
+internal/keymanager/         Key lifecycle mgmt: JWT signing key, cache-encryption key, MOSIP partner
+                              signing key (see internal/keymanager/README.md)
+  cryptomanager/             AES/RSA-OAEP encrypt-decrypt on top of keymanager keys
+  signature/                 JWS sign/verify on top of keymanager keys
+  keystore/pkcs11/, pkcs12/  HSM/SoftHSM2 (cgo-only) or file-based key storage backends
 internal/security/           JWKS validation, scope middleware, request-time checks
 internal/log/                Structured logging helpers
 internal/common/             Shared models/utils
 data/                        Declarative YAML (deployment.yaml, flows/, i18n/, layouts/, themes/)
-keys/                        signing.key + signing.crt (generated locally, gitignored)
+keys/                        signing.key + signing.crt (generated locally, gitignored) — legacy;
+                              JWT signing now goes through internal/keymanager, not this file pair
 sqlc.yaml                    SQLC codegen config for internal/clientmgmt/db
 make.sh                      build/run/test entry point (Linux + Git Bash)
 ```
@@ -34,7 +40,7 @@ Everything goes through `./make.sh` (run from this directory):
 
 ```bash
 ./make.sh build            # compiles out/esignet[.exe]; generates signing keys first
-./make.sh run               # go run for development (AUTHN_PROVIDER defaults to mosip)
+./make.sh run               # go run for development (MOSIP_ESIGNET_AUTHN_PROVIDER defaults to mosip)
 ./make.sh test               # go test -race -cover ./...
 ./make.sh coverage          # coverage.out + summary
 ./make.sh lint               # golangci-lint run ./...
@@ -43,8 +49,13 @@ Everything goes through `./make.sh` (run from this directory):
 End-to-end / client-mgmt API checks are done via the [Postman collection](../postman-collection/README.md) (a sibling directory, outside `esignet-service`), not a shell script.
 
 - Tests use `miniredis` (no live Redis needed) and mock queriers for the
-  Postgres layer, so `./make.sh test` runs standalone. Run `./make.sh keys`
-  first if a test exercises JWT signing (build targets do this automatically).
+  Postgres layer, so `./make.sh test` runs standalone. `internal/keymanager`
+  tests provision their own keys against a mock querier/keystore — no live
+  Postgres or `keys/signing.key` needed there either.
+- `CGO_ENABLED=0` by default (see `make.sh`); this stubs out the PKCS#11
+  keystore backend at startup, so local runs need
+  `KEYMANAGER_KEYSTORE_TYPE=PKCS12`. Build/test with `CGO_ENABLED=1` (and a
+  C toolchain) to exercise the real PKCS#11 backend.
 - After changing `internal/clientmgmt/db/query.sql` or `schema.sql`, regenerate
   the generated Go DB layer with `./make.sh sqlc-install` (one-time) then
   `./make.sh sqlc` — never hand-edit `internal/clientmgmt/db/*.go` generated files.
@@ -59,6 +70,22 @@ End-to-end / client-mgmt API checks are done via the [Postman collection](../pos
 - Env-driven configuration lives in `internal/config/`; add new settings there
   with sane defaults, and document them in `README.md`'s environment-variable
   tables when user-facing.
+- Config precedence: most settings resolve env var > `data/deployment.yaml` >
+  compiled-in default, via `envOrConfigOrDefault`/`envIntOrConfigOrDefault`/
+  `envBoolOrConfig` in `internal/config/app.go`. A zero/negative value at any
+  tier is treated as "not set" and falls through — if a new setting needs a
+  "0 = no limit"-style opt-out, follow `envIntOrConfigOrDefaultAllowEnvZero`'s
+  pattern (env-var-only; a yaml `0` still can't be told apart from an omitted
+  field) rather than inventing a new precedence scheme. See README's
+  [Configuration precedence](README.md#configuration-precedence) section for
+  the user-facing version, including the two documented exceptions (Redis
+  pool/timeout fields are env-only; the Postgres DSN resolves as a whole
+  rather than per-field).
+- Service-specific env vars are prefixed `MOSIP_ESIGNET_` (e.g.
+  `MOSIP_ESIGNET_LAYOUT_ID`, `MOSIP_ESIGNET_OIDC_UI_SCHEME`,
+  `MOSIP_ESIGNET_OAUTH_PAR_EXPIRY_SECONDS`) to avoid collisions with other
+  MOSIP services and generic infra vars (`DATABASE_URL`, `REDIS_HOST`, etc.,
+  which stay unprefixed). Name new settings accordingly.
 - Auth providers (`mosip`, `sunbird`, `mock`) are added under
   `internal/engine/<provider>/` and follow the same `authenticator.go` /
   `config.go` / `init.go` / `model.go` shape as existing providers.

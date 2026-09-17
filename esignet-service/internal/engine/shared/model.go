@@ -8,6 +8,13 @@ package shared
 
 // SendOTPResult represents the result of an generate and notify OTP attempt.
 type SendOTPResult struct {
-	MaskedEmail  string `json:"maskedEmail,omitempty"`
-	MaskedMobile string `json:"maskedMobile,omitempty"`
+	TransactionID string
+	MaskedEmail   string `json:"maskedEmail,omitempty"`
+	MaskedMobile  string `json:"maskedMobile,omitempty"`
+}
+
+// CertificateData holds Certificates from ID systems
+type CertificateData struct {
+	KeyID       string
+	Certificate string
 }

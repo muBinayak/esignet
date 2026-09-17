@@ -7,6 +7,7 @@
 package security
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -29,8 +30,8 @@ func (ts *JwksTestSuite) TestJWKSCache_GetKey_RSA() {
 	}))
 	defer srv.Close()
 
-	cache := NewJWKSCache(srv.URL, time.Minute)
-	key, err := cache.GetKey("rsa-1")
+	cache := NewJWKSCache(srv.URL, time.Minute, http.DefaultClient)
+	key, err := cache.GetKey(context.Background(), "rsa-1")
 	if err != nil {
 		t.Fatalf("GetKey: %v", err)
 	}
@@ -39,7 +40,7 @@ func (ts *JwksTestSuite) TestJWKSCache_GetKey_RSA() {
 	}
 
 	// Second call within TTL should be served from cache, not re-fetch.
-	if _, err := cache.GetKey("rsa-1"); err != nil {
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err != nil {
 		t.Fatalf("GetKey (cached): %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
@@ -57,11 +58,11 @@ func (ts *JwksTestSuite) TestJWKSCache_GetKey_UnknownKidForcesRefresh() {
 	}))
 	defer srv.Close()
 
-	cache := NewJWKSCache(srv.URL, time.Minute)
-	if _, err := cache.GetKey("rsa-1"); err != nil {
+	cache := NewJWKSCache(srv.URL, time.Minute, http.DefaultClient)
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err != nil {
 		t.Fatalf("GetKey: %v", err)
 	}
-	if _, err := cache.GetKey("missing-kid"); err == nil {
+	if _, err := cache.GetKey(context.Background(), "missing-kid"); err == nil {
 		t.Fatal("expected error for unknown kid")
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
@@ -79,12 +80,12 @@ func (ts *JwksTestSuite) TestJWKSCache_GetKey_ExpiredTTLRefetches() {
 	}))
 	defer srv.Close()
 
-	cache := NewJWKSCache(srv.URL, time.Millisecond)
-	if _, err := cache.GetKey("rsa-1"); err != nil {
+	cache := NewJWKSCache(srv.URL, time.Millisecond, http.DefaultClient)
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err != nil {
 		t.Fatalf("GetKey: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if _, err := cache.GetKey("rsa-1"); err != nil {
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err != nil {
 		t.Fatalf("GetKey after TTL expiry: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
@@ -99,16 +100,16 @@ func (ts *JwksTestSuite) TestJWKSCache_GetKey_HTTPError() {
 	}))
 	defer srv.Close()
 
-	cache := NewJWKSCache(srv.URL, time.Minute)
-	if _, err := cache.GetKey("rsa-1"); err == nil {
+	cache := NewJWKSCache(srv.URL, time.Minute, http.DefaultClient)
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err == nil {
 		t.Fatal("expected error on non-200 response")
 	}
 }
 
 func (ts *JwksTestSuite) TestJWKSCache_GetKey_TransportError() {
 	t := ts.T()
-	cache := NewJWKSCache("http://127.0.0.1:0", time.Minute)
-	if _, err := cache.GetKey("rsa-1"); err == nil {
+	cache := NewJWKSCache("http://127.0.0.1:0", time.Minute, http.DefaultClient)
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err == nil {
 		t.Fatal("expected error on transport failure")
 	}
 }
@@ -120,8 +121,8 @@ func (ts *JwksTestSuite) TestJWKSCache_GetKey_InvalidJSON() {
 	}))
 	defer srv.Close()
 
-	cache := NewJWKSCache(srv.URL, time.Minute)
-	if _, err := cache.GetKey("rsa-1"); err == nil {
+	cache := NewJWKSCache(srv.URL, time.Minute, http.DefaultClient)
+	if _, err := cache.GetKey(context.Background(), "rsa-1"); err == nil {
 		t.Fatal("expected error on invalid JSON")
 	}
 }
@@ -138,9 +139,9 @@ func (ts *JwksTestSuite) TestJWKSCache_SkipsEncryptionKeysAndUnparsableKeys() {
 	}))
 	defer srv.Close()
 
-	cache := NewJWKSCache(srv.URL, time.Minute)
+	cache := NewJWKSCache(srv.URL, time.Minute, http.DefaultClient)
 	for _, kid := range []string{"enc-1", "bad-1", "unsupported-1"} {
-		if _, err := cache.GetKey(kid); err == nil {
+		if _, err := cache.GetKey(context.Background(), kid); err == nil {
 			t.Errorf("expected %q to be excluded from the cache", kid)
 		}
 	}

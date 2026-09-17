@@ -8,6 +8,7 @@ package inmemory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -46,7 +47,7 @@ func newInMemoryStore(deploymentID string) providers.RuntimeStoreProvider {
 }
 
 // Put stores a value in the in-memory store with the specified TTL.
-func (s *inMemoryStore) Put(_ context.Context, namespace providers.RuntimeStoreNamespace,
+func (s *inMemoryStore) Put(ctx context.Context, namespace providers.RuntimeStoreNamespace,
 	key string, value []byte, ttlSeconds int64) error {
 	e := &entry{value: value}
 	if ttlSeconds > 0 {
@@ -57,8 +58,31 @@ func (s *inMemoryStore) Put(_ context.Context, namespace providers.RuntimeStoreN
 	s.data[s.getFormattedKey(namespace, key)] = e
 	s.mu.Unlock()
 
-	s.logger.Debug("Stored in memory", applog.String("key", key))
+	s.logger.Debug(ctx, "Stored in memory", applog.String("key", key))
 	return nil
+}
+
+// PutIfNotExists atomically stores a value only if the key does not already hold a non-expired value.
+func (s *inMemoryStore) PutIfNotExists(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key string, value []byte, ttlSeconds int64) (bool, error) {
+	e := &entry{value: value}
+	if ttlSeconds > 0 {
+		e.expiresAt = time.Now().Add(time.Duration(ttlSeconds) * time.Second)
+	}
+
+	fk := s.getFormattedKey(namespace, key)
+
+	s.mu.Lock()
+	existing, ok := s.data[fk]
+	if ok && !existing.isExpired() {
+		s.mu.Unlock()
+		return false, nil
+	}
+	s.data[fk] = e
+	s.mu.Unlock()
+
+	s.logger.Debug(ctx, "Stored in memory", applog.String("key", key))
+	return true, nil
 }
 
 // Get retrieves a value from the in-memory store by its key.
@@ -100,7 +124,7 @@ func (s *inMemoryStore) Delete(_ context.Context, namespace providers.RuntimeSto
 }
 
 // Take retrieves and removes a value from the in-memory store by its key.
-func (s *inMemoryStore) Take(_ context.Context, namespace providers.RuntimeStoreNamespace,
+func (s *inMemoryStore) Take(ctx context.Context, namespace providers.RuntimeStoreNamespace,
 	key string) ([]byte, error) {
 	fk := s.getFormattedKey(namespace, key)
 
@@ -117,8 +141,40 @@ func (s *inMemoryStore) Take(_ context.Context, namespace providers.RuntimeStore
 		return nil, nil
 	}
 
-	s.logger.Debug("Taken from memory", applog.String("key", key))
+	s.logger.Debug(ctx, "Taken from memory", applog.String("key", key))
 	return e.value, nil
+}
+
+// CompareFieldAndSwap replaces the stored value with newValue only when the top-level JSON string
+// field of the current value equals expected, preserving the existing TTL.
+func (s *inMemoryStore) CompareFieldAndSwap(_ context.Context, namespace providers.RuntimeStoreNamespace,
+	key, field, expected string, newValue []byte) (bool, error) {
+	fk := s.getFormattedKey(namespace, key)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.data[fk]
+	if !ok || e.isExpired() {
+		return false, nil
+	}
+
+	var value any
+	if err := json.Unmarshal(e.value, &value); err != nil {
+		return false, fmt.Errorf("failed to unmarshal stored value: %w", err)
+	}
+
+	doc, ok := value.(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	current, ok := doc[field].(string)
+	if !ok || current != expected {
+		return false, nil
+	}
+
+	s.data[fk] = &entry{value: newValue, expiresAt: e.expiresAt}
+	return true, nil
 }
 
 // ExtendTTL extends the TTL of an existing entry in the in-memory store.

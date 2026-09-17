@@ -44,6 +44,17 @@ select {
   fill: var(--language-icon-bg-color);
 }
 
+.checkIcon {
+  stroke: var(--language-check-icon-color);
+  stroke-width: 2px;
+}
+
+.selectedLang,
+.langDropdown:hover {
+  font-weight: 500;
+  color: var(--selected-lang-text-color);
+}
+
 .brand-logo {
   content: var(--brand-logo-url);
   height: 40px;
@@ -103,7 +114,7 @@ select {
   width: var(--top-left-bg-width);
   height: var(--top-left-bg-height);
   top: var(--top-left-bg-position-top);
-  left: var(--top-left-bg-position-left);
+  inset-inline-start: var(--top-left-bg-position-left);
 }
 
 .section-background .bottom_right_bg_logo {
@@ -114,7 +125,7 @@ select {
   width: var(--bottom-right-bg-width);
   height: var(--bottom-right-bg-height);
   bottom: var(--bottom-right-bg-position-bottom);
-  right: var(--bottom-right-bg-position-right);
+  inset-inline-end: var(--bottom-right-bg-position-right);
 }
 
 .back-button-color {
@@ -127,6 +138,7 @@ select {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  /* left + translate(-50%) is direction-agnostic for centering */
 }
 
 .error-page-header {
@@ -208,24 +220,21 @@ input[type="password"]::-ms-clear {
 }
 
 /* css for ACR selection button */
-.thunderid-signin__button.thunderid-button__secondary.thunderid-button__outline {
-  justify-content: flex-start;
-  border-color: var(--login-card-box-color);
-  background-color: white;
-  color: black;
-  &:hover {
-    border-color: var(--primary-color);
-    color: black;
-    background-color: white;
+.left-align-button {
+  justify-content: flex-start !important;
+  border-color: var(--login-card-box-color) !important;
+  background-color: white !important;
+  color: black !important;
+  &:hover:not(:disabled) {
+    border-color: var(--primary-color) !important;
+    color: black !important;
+    background-color: white !important;
   }
 
-  /* size of icon in ACR selection button */
+  /* size of icon in ACR selection and Multiple LoginID Types button */
   & .thunderid-button__start-icon > img {
     width: 24px !important;
-  }
-
-  form#resend_otp_block > & {
-    justify-content: center;
+    height: auto !important;
   }
 }
 
@@ -238,17 +247,36 @@ input[type="password"]::-ms-clear {
   background-image: var(--login-card-separator);
   border: 0;
   height: 8px;
-  margin-left: -2rem;
+  margin-inline-start: -2rem;
   width: calc(100% + 4rem);
 }
 
 /* login ID button styles */
 .login-id-button {
-  width: 47% !important;
+  white-space: normal !important;
+  padding: 0.5rem !important;
+  color: var(--login_id_label_color) !important;
+  font-size: 0.875rem !important;
 }
 
 /* login ID button active state */
 .login-id-button--active {
   border-color: var(--primary-color) !important;
   color: var(--primary-color) !important;
+}
+
+/* center the Captcha Widget */
+.captcha-renderer {
+  display: flex;
+  justify-content: center;
+}
+
+/* Workaround: center consent timer text */
+[data-testid="thunderid-signin"] .thunderid-typography:first-child {
+  text-align: center !important;
+}
+
+/* SBI biometric device dropdown to render outside the login card. */
+.thunderid-signin.thunderid-card {
+  overflow: visible !important;
 }

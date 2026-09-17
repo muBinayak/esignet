@@ -20,6 +20,7 @@ import (
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	applog "github.com/mosip/esignet/internal/log"
+	"github.com/mosip/esignet/internal/reqcontext"
 )
 
 const (
@@ -48,19 +49,14 @@ type auditor struct {
 
 // NewAuditor builds an audit-manager observability provider. It fails if no
 // audit manager endpoint is configured.
-func NewAuditor(client *http.Client) (providers.ObservabilityProvider, error) {
-	auditCfg, err := LoadAuditConfig()
-	if err != nil {
-		return nil, err
-	}
-
+func NewAuditor(client *http.Client, pluginConfig Config, tokenProvider *tokenProvider) (providers.ObservabilityProvider, error) {
 	hostName, err := os.Hostname()
 	if err != nil || hostName == "" {
 		hostName = defaultHost
 	}
 
 	return &auditor{
-		client:   NewClient(auditCfg, client),
+		client:   NewClient(pluginConfig, client, tokenProvider),
 		hostName: hostName,
 		log:      applog.GetLogger(),
 	}, nil
@@ -73,20 +69,24 @@ func (a *auditor) IsEnabled() bool {
 
 // PublishEvent maps a flow lifecycle event to an audit record and posts it
 // asynchronously. Errors never propagate to the caller.
-func (a *auditor) PublishEvent(_ context.Context, evt *providers.Event) {
+func (a *auditor) PublishEvent(ctx context.Context, evt *providers.Event) {
 	if evt == nil {
 		return
 	}
 
 	req := a.toAuditRequest(evt)
+	traceID := reqcontext.TraceIDFromContext(ctx)
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+		// Deliberately derived from context.Background(), not ctx: the publish
+		// must outlive the request that triggered it, so it can't inherit the
+		// request's cancellation. The trace ID is carried over separately so
+		// the fire-and-forget log line still correlates back to that request.
+		publishCtx, cancel := context.WithTimeout(reqcontext.WithTraceID(context.Background(), traceID), publishTimeout)
 		defer cancel()
-		if err := a.client.Post(ctx, req); err != nil {
-			a.log.Error("audit: failed to publish event",
+		if err := a.client.Post(publishCtx, req); err != nil {
+			a.log.Error(publishCtx, "audit: failed to publish event",
 				applog.String("event_type", evt.Type),
-				applog.String("trace_id", evt.TraceID),
 				applog.Error(err))
 		}
 	}()
@@ -172,19 +172,19 @@ func firstNonEmpty(values ...string) string {
 
 // Client posts audit records to mosip-audit-manager.
 type Client struct {
-	cfg    AuditConfig
-	client *http.Client
-	token  *tokenProvider
-	log    *applog.Logger
+	cfg           Config
+	client        *http.Client
+	tokenProvider *tokenProvider
+	log           *applog.Logger
 }
 
 // NewClient builds an audit manager client from the given config and HTTP client.
-func NewClient(cfg AuditConfig, client *http.Client) *Client {
+func NewClient(cfg Config, client *http.Client, tokenProvider *tokenProvider) *Client {
 	return &Client{
-		cfg:    cfg,
-		client: client,
-		token:  newTokenProvider(cfg, client),
-		log:    applog.GetLogger(),
+		cfg:           cfg,
+		client:        client,
+		tokenProvider: tokenProvider,
+		log:           applog.GetLogger(),
 	}
 }
 
@@ -208,16 +208,16 @@ func (c *Client) Post(ctx context.Context, audit AuditRequest) error {
 
 	// A stale token yields 401/403; purge and retry once with a fresh token.
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		c.log.Warn("audit: auth rejected by audit manager, refreshing token",
+		c.log.Warn(ctx, "audit: auth rejected by audit manager, refreshing token",
 			applog.Int("status", status))
-		c.token.Purge()
+		c.tokenProvider.Purge()
 		if status, err = c.send(ctx, body); err != nil {
 			return err
 		}
 	}
 
 	if status < 200 || status >= 300 {
-		c.log.Error("audit: audit manager returned non-2xx status",
+		c.log.Error(ctx, "audit: audit manager returned non-2xx status",
 			applog.Int("status", status))
 	}
 	return nil
@@ -232,7 +232,7 @@ func (c *Client) send(ctx context.Context, body []byte) (int, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	token, tErr := c.token.GetAuthToken(ctx)
+	token, tErr := c.tokenProvider.GetAuthToken(ctx)
 	if tErr != nil {
 		return 0, fmt.Errorf("acquire audit auth token: %w", tErr)
 	}
@@ -249,7 +249,7 @@ func (c *Client) send(ctx context.Context, body []byte) (int, error) {
 	if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
 		var wrapper AuditResponseWrapper
 		if json.Unmarshal(bodyBytes, &wrapper) == nil && len(wrapper.Errors) > 0 {
-			c.log.Error("audit: audit manager returned errors",
+			c.log.Error(ctx, "audit: audit manager returned errors",
 				applog.Any("errors", wrapper.Errors))
 		}
 	}

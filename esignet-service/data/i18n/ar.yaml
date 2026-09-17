@@ -4,11 +4,11 @@ system:
   "design.resolve.error.app_not_found": التطبيق غير موجود
   "design.resolve.error.app_not_found_description": التطبيق بالمعرف المحدد غير موجود
   "design.resolve.error.invalid_type": تنسيق الطلب غير صالح
-  "design.resolve.error.invalid_type_description": معامل الاستعلام 'type' مطلوب ويجب أن يكون إما 'APP' أو 'OU'
+  "design.resolve.error.invalid_type_description": معامل الاستعلام \"type\" مطلوب ويجب أن يكون إما \"APP\" أو \"OU\"
   "design.resolve.error.missing_id": تنسيق الطلب غير صالح
-  "design.resolve.error.missing_id_description": معامل الاستعلام 'id' مطلوب
+  "design.resolve.error.missing_id_description": معامل الاستعلام \"id\" مطلوب
   "design.resolve.error.unsupported_type": نوع الحل غير مدعوم
-  "design.resolve.error.unsupported_type_description": نوع الحل المحدد غير مدعوم حتى الآن. حالياً يُدعم فقط النوع 'APP'
+  "design.resolve.error.unsupported_type_description": نوع الحل المحدد غير مدعوم حتى الآن. حالياً يُدعم فقط النوع \"APP\"
   "error.actor_not_found": الجهة الفاعلة غير موجودة
   "error.actor_not_found_description": الجهة الفاعلة المطلوبة غير موجودة
   "error.agentservice.agent_already_exists_with_client_id": معرف العميل مستخدم بالفعل
@@ -25,7 +25,7 @@ system:
   "error.agentservice.cannot_modify_declarative_resource_description": لا يمكن تعديل الوكلاء المُدارين تعريفياً عبر API
   "error.agentservice.certificate_operation_failed": فشلت عملية الشهادة
   "error.agentservice.certificate_operation_failed_description": فشلت عملية شهادة بسبب مدخلات غير صالحة
-  "error.agentservice.client_credentials_cannot_use_none_auth_description": نوع منح client_credentials لا يمكنه استخدام طريقة المصادقة 'none'
+  "error.agentservice.client_credentials_cannot_use_none_auth_description": نوع منح client_credentials لا يمكنه استخدام طريقة المصادقة \"none\"
   "error.agentservice.client_credentials_cannot_use_response_types_description": لا يمكن استخدام نوع منح client_credentials مع أنواع الاستجابة
   "error.agentservice.client_secret_cannot_have_certificate_description": لا يمكن لطرق مصادقة client_secret امتلاك شهادة
   "error.agentservice.consent_sync_failed": فشل مزامنة الموافقة
@@ -86,8 +86,8 @@ system:
   "error.agentservice.missing_agent_id_description": معرف الوكيل مطلوب
   "error.agentservice.multiple_oauth_configs": لا يُسمح بتكوينات مصادقة OAuth واردة متعددة
   "error.agentservice.multiple_oauth_configs_description": يمكن للكيان امتلاك تكوين مصادقة وارد واحد على الأكثر لكل بروتوكول
-  "error.agentservice.none_auth_method_cannot_have_cert_or_secret_description": لا يمكن لطريقة المصادقة 'none' امتلاك شهادة أو سر عميل
-  "error.agentservice.none_auth_method_requires_public_client_description": طريقة المصادقة 'none' تتطلب أن يكون العميل عميلاً عاماً
+  "error.agentservice.none_auth_method_cannot_have_cert_or_secret_description": لا يمكن لطريقة المصادقة \"none\" امتلاك شهادة أو سر عميل
+  "error.agentservice.none_auth_method_requires_public_client_description": طريقة المصادقة \"none\" تتطلب أن يكون العميل عميلاً عاماً
   "error.agentservice.organization_unit_not_found": وحدة المؤسسة غير موجودة
   "error.agentservice.organization_unit_not_found_description": وحدة المؤسسة المحددة غير موجودة
   "error.agentservice.owner_not_found": المالك غير موجود
@@ -96,7 +96,7 @@ system:
   "error.agentservice.private_key_jwt_cannot_have_client_secret_description": لا يمكن لطريقة مصادقة private_key_jwt امتلاك سر عميل
   "error.agentservice.private_key_jwt_requires_certificate_description": طريقة مصادقة private_key_jwt تتطلب شهادة
   "error.agentservice.public_client_must_have_pkce_description": يجب على العملاء العامين تعيين PKCE مطلوباً على true
-  "error.agentservice.public_client_must_use_none_auth_description": يجب على العملاء العامين استخدام 'none' كطريقة مصادقة لنقطة نهاية الرمز
+  "error.agentservice.public_client_must_use_none_auth_description": يجب على العملاء العامين استخدام \"none\" كطريقة مصادقة لنقطة نهاية الرمز
   "error.agentservice.redirect_uri_fragment_not_allowed_description": يجب ألا تحتوي عناوين URI لإعادة التوجيه على مكون fragment
   "error.agentservice.refresh_token_cannot_be_sole_grant_description": لا يمكن استخدام نوع منح refresh_token دون نوع منح آخر
   "error.agentservice.response_types_require_authorization_code_description": لا يمكن تكوين أنواع الاستجابة إلا مع نوع منح authorization_code
@@ -130,7 +130,7 @@ system:
   "error.applicationservice.cannot_modify_declarative_resource_description": التطبيق تعريفي ولا يمكن تعديله أو حذفه
   "error.applicationservice.certificate_operation_failed": فشلت عملية الشهادة
   "error.applicationservice.certificate_operation_failed_description": حدث خطأ أثناء معالجة شهادة التطبيق
-  "error.applicationservice.client_credentials_cannot_use_none_auth_description": نوع منح client_credentials لا يمكنه استخدام طريقة المصادقة 'none'
+  "error.applicationservice.client_credentials_cannot_use_none_auth_description": نوع منح client_credentials لا يمكنه استخدام طريقة المصادقة \"none\"
   "error.applicationservice.client_credentials_cannot_use_response_types_description": لا يمكن استخدام نوع منح client_credentials مع أنواع الاستجابة
   "error.applicationservice.client_secret_cannot_have_certificate_description": لا يمكن لطرق مصادقة client_secret امتلاك شهادة
   "error.applicationservice.consent_service_not_enabled": خدمة الموافقة غير مفعلة
@@ -170,7 +170,7 @@ system:
   "error.applicationservice.invalid_jwks_uri": JWKS URI غير صالح
   "error.applicationservice.invalid_jwks_uri_description": JWKS URI المقدم ليس URI صالحاً
   "error.applicationservice.invalid_jwks_uri_scheme": مخطط JWKS URI غير صالح
-  "error.applicationservice.invalid_jwks_uri_scheme_description": يجب أن يستخدم 'jwks_uri' مخطط HTTPS
+  "error.applicationservice.invalid_jwks_uri_scheme_description": يجب أن يستخدم \"jwks_uri\" مخطط HTTPS
   "error.applicationservice.invalid_logo_url": رابط الشعار غير صالح
   "error.applicationservice.invalid_logo_url_description": رابط الشعار المقدم ليس URI صالحاً
   "error.applicationservice.invalid_oauth_configuration": تكوين OAuth غير صالح
@@ -197,13 +197,13 @@ system:
   "error.applicationservice.layout_not_found_description": تكوين التخطيط المحدد غير موجود
   "error.applicationservice.multiple_oauth_configs": لا يُسمح بتكوينات مصادقة OAuth واردة متعددة
   "error.applicationservice.multiple_oauth_configs_description": يمكن للتطبيق امتلاك تكوين مصادقة وارد واحد على الأكثر لكل بروتوكول
-  "error.applicationservice.none_auth_method_cannot_have_cert_or_secret_description": لا يمكن لطريقة المصادقة 'none' امتلاك شهادة أو سر عميل
-  "error.applicationservice.none_auth_method_requires_public_client_description": طريقة المصادقة 'none' تتطلب أن يكون العميل عميلاً عاماً
+  "error.applicationservice.none_auth_method_cannot_have_cert_or_secret_description": لا يمكن لطريقة المصادقة \"none\" امتلاك شهادة أو سر عميل
+  "error.applicationservice.none_auth_method_requires_public_client_description": طريقة المصادقة \"none\" تتطلب أن يكون العميل عميلاً عاماً
   "error.applicationservice.pkce_requires_authorization_code_description": لا يمكن تفعيل PKCE إلا عند تحديد نوع منح authorization_code
   "error.applicationservice.private_key_jwt_cannot_have_client_secret_description": لا يمكن لطريقة مصادقة private_key_jwt امتلاك سر عميل
   "error.applicationservice.private_key_jwt_requires_certificate_description": طريقة مصادقة private_key_jwt تتطلب شهادة
   "error.applicationservice.public_client_must_have_pkce_description": يجب على العملاء العامين تعيين PKCE مطلوباً على true
-  "error.applicationservice.public_client_must_use_none_auth_description": يجب على العملاء العامين استخدام 'none' كطريقة مصادقة لنقطة نهاية الرمز
+  "error.applicationservice.public_client_must_use_none_auth_description": يجب على العملاء العامين استخدام \"none\" كطريقة مصادقة لنقطة نهاية الرمز
   "error.applicationservice.redirect_uri_fragment_not_allowed_description": يجب ألا تحتوي عناوين URI لإعادة التوجيه على مكون fragment
   "error.applicationservice.refresh_token_cannot_be_sole_grant_description": لا يمكن استخدام نوع منح refresh_token دون نوع منح آخر
   "error.applicationservice.response_types_require_authorization_code_description": لا يمكن تكوين أنواع الاستجابة إلا مع نوع منح authorization_code
@@ -429,7 +429,7 @@ system:
   "error.dcr.invalid_request_format": تنسيق الطلب غير صالح
   "error.dcr.invalid_request_format_description": جسم الطلب مفقود أو بتنسيق غير صالح
   "error.dcr.jwks_configuration_conflict": تعارض في تكوين JWKS
-  "error.dcr.jwks_configuration_conflict_description": لا يمكن تحديد كلٍّ من معاملَي 'jwks' و 'jwks_uri' معاً
+  "error.dcr.jwks_configuration_conflict_description": لا يمكن تحديد كلٍّ من معاملَي \"jwks\" و \"jwks_uri\" معاً
   "error.dcr.server_error": خطأ في الخادم
   "error.dcr.server_error_description": حدث خطأ غير متوقع أثناء معالجة الطلب
   "error.dcr.unauthorized": غير مصرح به
@@ -528,11 +528,11 @@ system:
   "error.flowmetaservice.application_not_found_description": التطبيق المحدد غير موجود
   "error.flowmetaservice.internal_server_error": خطأ داخلي في الخادم
   "error.flowmetaservice.invalid_request": طلب غير صالح
-  "error.flowmetaservice.invalid_type_description": يجب أن يكون معامل 'type' إما 'APP' أو 'OU'
-  "error.flowmetaservice.missing_id_description": معامل الاستعلام 'id' مطلوب
+  "error.flowmetaservice.invalid_type_description": يجب أن يكون معامل \"type\" إما \"APP\" أو \"OU\"
+  "error.flowmetaservice.missing_id_description": معامل الاستعلام \"id\" مطلوب
   "error.flowmetaservice.missing_id_parameter": معامل مطلوب مفقود
   "error.flowmetaservice.missing_required_parameter": معامل مطلوب مفقود
-  "error.flowmetaservice.missing_type_description": معامل الاستعلام 'type' مطلوب
+  "error.flowmetaservice.missing_type_description": معامل الاستعلام \"type\" مطلوب
   "error.flowmetaservice.ou_fetch_failed": خطأ داخلي في الخادم
   "error.flowmetaservice.ou_fetch_failed_description": فشل في استرداد معلومات وحدة المؤسسة
   "error.flowmetaservice.ou_not_found": المورد غير موجود
@@ -600,7 +600,7 @@ system:
   "error.groupservice.invalid_member_id": معرف العضو غير صالح
   "error.groupservice.invalid_member_id_description": معرف عضو مستخدم أو تطبيق واحد أو أكثر في الطلب غير موجود أو لا يطابق النوع المُدّعى
   "error.groupservice.invalid_member_type": نوع العضو غير صالح
-  "error.groupservice.invalid_member_type_description": يجب أن يكون نوع العضو 'user' أو 'group' أو 'app'
+  "error.groupservice.invalid_member_type_description": يجب أن يكون نوع العضو \"user\" أو \"group\" أو \"APP\"
   "error.groupservice.invalid_offset_parameter": معامل الإزاحة غير صالح
   "error.groupservice.invalid_offset_parameter_description": يجب أن يكون معامل الإزاحة عدداً صحيحاً غير سالب
   "error.groupservice.invalid_ou_id": معرف OU غير صالح
@@ -754,7 +754,7 @@ system:
   "error.ouservice.circular_dependency_detected": اعتماد دائري مكتشف
   "error.ouservice.circular_dependency_detected_description": تعيين هذا الأصل سيؤدي إلى إنشاء اعتماد دائري
   "error.ouservice.invalid_filter": معامل التصفية غير صالح
-  "error.ouservice.invalid_filter_description": "معامل التصفية غير صالح. استخدم التنسيق: attribute (eq|gt|lt) \"value\""
+  "error.ouservice.invalid_filter_description": 'معامل التصفية غير صالح. استخدم التنسيق: attribute (eq|gt|lt) "value"'
   "error.ouservice.invalid_handle_path": مسار المقبض غير صالح
   "error.ouservice.invalid_handle_path_description": مسار المقبض المحدد غير موجود
   "error.ouservice.invalid_limit_parameter": معامل الحد غير صالح
@@ -868,7 +868,7 @@ system:
   "error.roleservice.empty_assignments_list": قائمة التعيينات فارغة
   "error.roleservice.empty_assignments_list_description": يجب تقديم تعيين واحد على الأقل
   "error.roleservice.invalid_assignee_type": نوع المُعيَّن غير صالح
-  "error.roleservice.invalid_assignee_type_description": يجب أن يكون معامل النوع 'user' أو 'group' أو 'app'
+  "error.roleservice.invalid_assignee_type_description": يجب أن يكون معامل النوع \"user\" أو \"group\" أو \"APP\"
   "error.roleservice.invalid_assignment_id": معرف التعيين غير صالح
   "error.roleservice.invalid_assignment_id_description": معرف تعيين واحد أو أكثر في الطلب غير موجود أو لا يطابق النوع المُدّعى
   "error.roleservice.invalid_limit_parameter": معامل الحد غير صالح
@@ -1188,3 +1188,126 @@ system:
   "theme.error.not_found_description": لم يتم العثور على تكوين السمة المطلوب
   "theme.error.result_limit_exceeded": تجاوز حد النتائج
   "theme.error.result_limit_exceeded_description": إجمالي عدد السمات يتجاوز الحد الأقصى المسموح به في الوضع المركب
+
+header:
+  login_heading: تسجيل الدخول
+  login_subheading: يطلب المصادقة لتسجيل الدخول
+  select_login_id: اختر خيار معرف تسجيل الدخول
+  select_login_mode: اختر طريقة تسجيل الدخول المفضلة
+
+input:
+  uin_label: UIN/VID
+  uin_placeholder: أدخل UIN/VID الخاص بك
+  policy_number_label: رقم البوليصة
+  policy_number_placeholder: أدخل رقم البوليصة الخاص بك
+  mobile_label: رقم الهاتف المحمول
+  mobile_placeholder: أدخل رقم الهاتف المحمول
+  email_label: البريد الإلكتروني
+  email_placeholder: أدخل البريد الإلكتروني
+  nrc_label: معرف NRC
+  nrc_placeholder: أدخل معرف NRC
+  password_label: كلمة المرور
+  password_placeholder: أدخل كلمة المرور الخاصة بك
+  username_label: اسم المستخدم
+  username_placeholder: أدخل اسم المستخدم الخاص بك
+  fullname_label: الاسم الكامل
+  fullname_placeholder: أدخل اسمك الكامل
+  dob_label: تاريخ الميلاد
+  dob_placeholder: حدد تاريخ ميلادك
+
+button:
+  continue: متابعة
+  login: تسجيل الدخول
+  verify: تحقق
+  get_otp: احصل على OTP
+  login_otp: تسجيل الدخول بـ OTP
+  login_password: تسجيل الدخول بكلمة المرور
+  login_biometrics: تسجيل الدخول بالقياسات الحيوية
+  login_kbi: تسجيل الدخول بـ KBI
+  login_id_uin: يو آي إن/فيد
+  login_id_mobile: رقم الهاتف المحمول
+  login_id_email: البريد الإلكتروني
+  login_id_nrc: معرف NRC
+
+otp:
+  enter_otp_title: أدخل OTP
+  otp_sent_msg: يرجى إدخال رمز OTP المكون من 6 أرقام المرسل إلى جهة الاتصال المسجلة الخاصة بك
+  resend_otp: إعادة إرسال OTP
+
+biometric:
+  title: قدم بياناتك الحيوية
+
+consent:
+  title: "يطلب الوصول إلى ما يلي:"
+  description: يرغب هذا التطبيق في الوصول إلى المعلومات التالية. يرجى المراجعة واختيار ما ترغب في مشاركته.
+  allow: السماح
+  deny: رفض
+  timer_label: يرجى اتخاذ الإجراء المناسب خلال
+  essential_claims: البيانات الأساسية
+  optional_claims: البيانات الاختيارية
+  authorize_scope: تفويض النطاقات
+  essential_claims.info: معلومات المستخدم الإلزامية المطلوبة من مزود الخدمة
+  optional_claims.info: معلومات إضافية للمستخدم يمكن للمقيم اختيار مشاركتها مع مزود الخدمة
+  authorize_scope.info: يسمح لمزود الخدمة بالوصول إلى هذه الخدمات المحمية نيابة عنك
+  name: الاسم الكامل
+  given_name: الاسم
+  middle_name: الاسم الأوسط
+  phone: الهاتف
+  phone_number: رقم الهاتف
+  phone_number_verified: تم التحقق من رقم الهاتف
+  email: البريد الإلكتروني
+  email_verified: تم التحقق من البريد الإلكتروني
+  address: العنوان
+  birthdate: تاريخ الميلاد
+  gender: الجنس
+  picture: الصورة
+  preferred_username: اسم المستخدم المفضل
+  locale: اللغة/المنطقة
+  nickname: الاسم المستعار
+  family_name: اسم العائلة
+  zoneinfo: المنطقة الزمنية
+  profile: الملف الشخصي
+  required: مطلوب
+
+signin:
+  images.app_logo.alt: شعار التطبيق
+
+validation:
+  uin.numeric: يجب أن يحتوي UIN/VID على أرقام فقط
+  uin.length: يجب أن يكون UIN/VID بين 10 و 16 رقمًا
+  mobile.numeric: يجب أن يحتوي رقم الهاتف المحمول على أرقام فقط
+  mobile.length: يجب أن يكون رقم الهاتف المحمول بين 9 و 11 رقمًا
+  email.format: يرجى إدخال عنوان بريد إلكتروني صالح
+  pattern.invalid: تنسيق غير صالح
+  minLength.invalid: القيمة قصيرة جدًا
+  maxLength.invalid: القيمة طويلة جدًا
+  policy.numeric: يجب أن يحتوي رقم الوثيقة على أرقام فقط
+  policy.length: يجب أن يكون رقم الوثيقة بين 8 و 50 رقمًا
+
+validations:
+  required.field.error: هذا الحقل مطلوب
+
+errors:
+  heading: خطأ
+  signin.initialization: تعذر بدء تسجيل الدخول. يرجى المحاولة مرة أخرى.
+  network.unavailable: الشبكة غير متاحة. يرجى التحقق من اتصالك.
+  something_went_wrong: حدث خطأ ما
+  unexpected_error: حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى لاحقًا.
+  page_not_found: الصفحة غير موجودة
+
+messages:
+  loading.placeholder: جاري التحميل...
+
+app:
+  footer.powered_by: مدعوم من
+  network_error.title: لا يوجد اتصال بالإنترنت
+  network_error.description: يرجى التحقق من اتصال الشبكة والمحاولة مرة أخرى.
+  network_error.try_again: حاول مرة أخرى
+  otp.resend_timer: يمكنك إعادة إرسال OTP في
+  otp.timed_out: انتهت المهلة
+  otp.submit: إرسال
+  back: رجوع
+  esignet_details: تفاصيل eSignet
+
+captcha:
+  config.error: إعداد موفر خدمة CAPTCHA غير صالح.

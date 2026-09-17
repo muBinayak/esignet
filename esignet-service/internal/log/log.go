@@ -14,9 +14,13 @@ package log
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
+
+	"github.com/mosip/esignet/internal/reqcontext"
 )
 
 const (
@@ -48,6 +52,11 @@ const (
 // slog.LevelError so access log records are never suppressed by LOG_LEVEL.
 const LevelAccess slog.Level = slog.LevelError + 32
 
+// traceIDFieldKey is the structured logging field name the Logger's logging
+// methods use to carry the trace ID, matching the "traceId" field already
+// emitted by Logger.Access.
+const traceIDFieldKey = "traceId"
+
 var (
 	logger *Logger
 	once   sync.Once
@@ -68,13 +77,34 @@ func GetLogger() *Logger {
 	return logger
 }
 
-func initLogger() error {
-	logLevel := os.Getenv(logLevelEnvVar)
-	if logLevel == "" {
-		logLevel = defaultLogLevel
+// resolveLevel reads the log level from the LOG_LEVEL environment variable
+// (falling back to defaultLogLevel when unset), normalizes casing, and
+// validates it against supportedLevels. It returns the canonical, lower-cased
+// name together with its slog.Level. This service's logger and the embedded
+// ThunderID engine both resolve through it, so they cannot diverge on casing
+// or an unsupported level.
+func resolveLevel() (string, slog.Level, error) {
+	name := defaultLogLevel
+	if logLevel := os.Getenv(logLevelEnvVar); logLevel != "" {
+		name = strings.ToLower(logLevel)
 	}
+	level, ok := supportedLevels[name]
+	if !ok {
+		return "", 0, fmt.Errorf("unsupported log level %q", name)
+	}
+	return name, level, nil
+}
 
-	level, err := parseLogLevel(logLevel)
+// ConfiguredLevel returns the canonical, lower-cased log level name so the
+// embedded ThunderID engine is configured from the same value this service's
+// logger uses.
+func ConfiguredLevel() (string, error) {
+	name, _, err := resolveLevel()
+	return name, err
+}
+
+func initLogger() error {
+	_, level, err := resolveLevel()
 	if err != nil {
 		return errors.New("error parsing log level: " + err.Error())
 	}
@@ -124,37 +154,54 @@ func (l *Logger) With(fields ...Field) *Logger {
 	return &Logger{internal: l.internal.With(convertFields(fields)...)}
 }
 
-// Debug logs a debug message.
-func (l *Logger) Debug(msg string, fields ...Field) {
-	l.internal.Debug(msg, withLevelValue(fields, levelValueDebug)...)
+// Debug logs a debug message, tagging it with the trace ID carried by ctx
+// (see WithTraceID), or "-" if ctx carries none.
+func (l *Logger) Debug(ctx context.Context, msg string, fields ...Field) {
+	l.internal.DebugContext(ctx, msg, withLevelValue(withTraceID(ctx, fields), levelValueDebug)...)
 }
 
-// Info logs an informational message.
-func (l *Logger) Info(msg string, fields ...Field) {
-	l.internal.Info(msg, withLevelValue(fields, levelValueInfo)...)
+// Info logs an informational message, tagging it with the trace ID carried
+// by ctx (see WithTraceID), or "-" if ctx carries none.
+func (l *Logger) Info(ctx context.Context, msg string, fields ...Field) {
+	l.internal.InfoContext(ctx, msg, withLevelValue(withTraceID(ctx, fields), levelValueInfo)...)
 }
 
-// Warn logs a warning message.
-func (l *Logger) Warn(msg string, fields ...Field) {
-	l.internal.Warn(msg, withLevelValue(fields, levelValueWarn)...)
+// Warn logs a warning message, tagging it with the trace ID carried by ctx
+// (see WithTraceID), or "-" if ctx carries none.
+func (l *Logger) Warn(ctx context.Context, msg string, fields ...Field) {
+	l.internal.WarnContext(ctx, msg, withLevelValue(withTraceID(ctx, fields), levelValueWarn)...)
 }
 
-// Error logs an error message.
-func (l *Logger) Error(msg string, fields ...Field) {
-	l.internal.Error(msg, withLevelValue(fields, levelValueError)...)
+// Error logs an error message, tagging it with the trace ID carried by ctx
+// (see WithTraceID), or "-" if ctx carries none.
+func (l *Logger) Error(ctx context.Context, msg string, fields ...Field) {
+	l.internal.ErrorContext(ctx, msg, withLevelValue(withTraceID(ctx, fields), levelValueError)...)
 }
 
-// Fatal logs an error message and exits the process.
+// Fatal logs an error message and exits the process. It takes no context: it
+// is only ever used for unrecoverable startup failures, before any request
+// (and its trace ID) exists.
 func (l *Logger) Fatal(msg string, fields ...Field) {
 	l.internal.Error(msg, withLevelValue(fields, levelValueError)...)
 	os.Exit(1)
 }
 
-// Access logs an HTTP access record. It always emits regardless of the
-// configured LOG_LEVEL, matching the ACCESS pseudo-level convention used by
-// the Java services' Tomcat access logs.
-func (l *Logger) Access(fields ...Field) {
-	l.internal.Log(context.Background(), LevelAccess, "access", withLevelValue(fields, levelValueAccess)...)
+// withTraceID prepends a traceId field (from ctx) to fields. It allocates a
+// new slice rather than prepending in place so the caller-supplied fields
+// slice is never mutated or aliased.
+func withTraceID(ctx context.Context, fields []Field) []Field {
+	out := make([]Field, 0, len(fields)+1)
+	out = append(out, String(traceIDFieldKey, reqcontext.TraceIDFromContext(ctx)))
+	return append(out, fields...)
+}
+
+// Access logs an HTTP access record, tagging it with the trace ID carried by
+// ctx (see WithTraceID), or "-" if ctx carries none. It
+// always emits regardless of the configured LOG_LEVEL, matching the ACCESS
+// pseudo-level
+// convention used by the Java services' Tomcat access logs.
+func (l *Logger) Access(ctx context.Context, fields ...Field) {
+	l.internal.Log(ctx, LevelAccess, "access", withLevelValue(withTraceID(ctx, fields), levelValueAccess)...)
 }
 
 // withLevelValue converts fields to slog attrs with levelValue appended.
@@ -165,12 +212,15 @@ func withLevelValue(fields []Field, levelValue int) []any {
 	return append(convertFields(fields), slog.Any(levelValueKey, levelValue))
 }
 
-func parseLogLevel(logLevel string) (slog.Level, error) {
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
-		return slog.LevelError, err
-	}
-	return level, nil
+// supportedLevels is the single source of truth for the level names this
+// service and the embedded ThunderID engine both accept, mapped to their
+// slog.Level. Only these values are honored; anything else is rejected by
+// resolveLevel rather than silently downgraded.
+var supportedLevels = map[string]slog.Level{
+	"debug": slog.LevelDebug,
+	"info":  slog.LevelInfo,
+	"warn":  slog.LevelWarn,
+	"error": slog.LevelError,
 }
 
 func convertFields(fields []Field) []any {

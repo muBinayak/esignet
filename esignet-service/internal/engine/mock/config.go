@@ -5,7 +5,7 @@
  */
 
 // Package mock provides a client for the MOSIP mock-identity-system, used as the
-// default AUTHN_PROVIDER for local development and testing.
+// default MOSIP_ESIGNET_AUTHN_PROVIDER for local development and testing.
 package mock
 
 import "os"
@@ -17,6 +17,7 @@ type Config struct {
 	KycExchangeV3URL string
 	SendOtpURL       string
 	OtpChannels      []string
+	CertificateURL   string
 }
 
 // LoadConfig reads mock-identity-system settings from environment variables.
@@ -38,6 +39,9 @@ func LoadConfig() Config {
 		),
 		SendOtpURL: envOrDefault(
 			"MOSIP_ESIGNET_MOCK_SEND_OTP_URL", base+"/send-otp",
+		),
+		CertificateURL: envOrDefault(
+			"MOSIP_ESIGNET_MOCK_AUTHENTICATOR_SIGNING_KEYS_URL", base+"/keys.json",
 		),
 		OtpChannels: []string{"email", "phone"},
 	}

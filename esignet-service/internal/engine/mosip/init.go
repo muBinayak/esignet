@@ -7,49 +7,49 @@
 package mosip
 
 import (
-	"net"
+	"context"
+	"errors"
 	"net/http"
-	"time"
 
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/mosip/esignet/internal/clientmgmt"
 	"github.com/mosip/esignet/internal/config"
 	"github.com/mosip/esignet/internal/engine/shared"
+	"github.com/mosip/esignet/internal/keymanager"
+	"github.com/mosip/esignet/internal/keymanager/signature"
 	applog "github.com/mosip/esignet/internal/log"
 )
 
-// newHTTPClient returns a tuned HTTP client for outbound MOSIP calls. Each
-// caller (the IDA authenticator, the audit-manager client) gets its own
-// instance.
-func newHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   5 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 10 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
-	}
-}
+// ErrNilCryptoService is returned when Init is given a nil keymanager
+// Service or signature Service. Storing either as nil would surface only as
+// a nil-pointer panic on the first outbound IDA signing call, well after
+// startup — reject it here instead.
+var ErrNilCryptoService = errors.New("mosip: keymanager service and signature service are required")
 
 // Init builds the MOSIP IDA authn provider and the mosip-audit-manager
-// observability provider. Each gets its own HTTP client (see newHTTPClient).
-func Init(appConfig *config.AppConfig, clientSvc *clientmgmt.Service) (
+// observability provider. svc/sigSvc are the keymanager services outbound
+// IDA requests are signed with (see NewMosipAuthnProvider).
+func Init(appConfig *config.AppConfig, clientSvc *clientmgmt.Service, httpClient *http.Client,
+	svc *keymanager.Service, sigSvc *signature.Service) (
 	shared.ConsolidatedAuthnProvider, providers.ObservabilityProvider, error) {
-	client := newHTTPClient()
-	authnProvider, err := NewMosipAuthnProvider(appConfig, clientSvc, client)
+	if svc == nil || sigSvc == nil {
+		return nil, nil, ErrNilCryptoService
+	}
+	pluginConfig, err := LoadConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	auditor, err := NewAuditor(client)
+
+	tokenProvider := newTokenProvider(pluginConfig, httpClient)
+	authnProvider, err := NewMosipAuthnProvider(appConfig, clientSvc, httpClient, svc, sigSvc, pluginConfig, tokenProvider)
 	if err != nil {
 		return nil, nil, err
 	}
-	applog.GetLogger().Info("MOSIP IDA authn provider and audit manager initialized")
+	auditor, err := NewAuditor(httpClient, pluginConfig, tokenProvider)
+	if err != nil {
+		return nil, nil, err
+	}
+	applog.GetLogger().Info(context.Background(), "MOSIP IDA authn provider and audit manager initialized")
 	return authnProvider, auditor, nil
 }
