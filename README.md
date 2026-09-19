@@ -42,3 +42,5 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 Third-party dependency licenses — see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
 
 <!-- pr-gate sandbox trigger 2026-09-17T15:07:23Z -->
+
+<!-- codecov.yml verification trigger 2026-09-19T15:10:25Z -->
