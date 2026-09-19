@@ -1,0 +1,59 @@
+codecov:
+  # false, not true: this repo carries many pre-existing CI workflows unrelated
+  # to the pr-gate coverage flags below (Docker builds, Maven UI-test rig,
+  # Postgres setup script tests, etc). require_ci_to_pass: true waits on every
+  # commit status on the SHA, not just these two flags, so a slow/flaky
+  # unrelated job would leave Codecov stuck reporting "Expected" indefinitely.
+  require_ci_to_pass: false
+  notify:
+    # Wait for exactly 2 uploads (go + npm, from pr-gate.yml's coverage-go and
+    # coverage-npm jobs) before posting the PR comment/status, so it isn't
+    # posted prematurely after only one flag has reported.
+    after_n_builds: 2
+
+flags:
+  go:
+    carryforward: false
+    paths:
+      - esignet-service/
+  npm:
+    carryforward: false
+    paths:
+      - oidc-ui/
+
+coverage:
+  status:
+    # informational: true everywhere — report coverage and diffs, but never
+    # fail a PR on a threshold. There's no known-good baseline yet; tune real
+    # targets once actual coverage numbers are visible on a few PRs.
+    project:
+      default:
+        informational: true
+      go:
+        flags:
+          - go
+        informational: true
+      npm:
+        flags:
+          - npm
+        informational: true
+      combined:
+        flags:
+          - go
+          - npm
+        informational: true
+    patch:
+      default:
+        informational: true
+
+ignore:
+  - "api-test/**"
+  - "ui-test/**"
+  - "performance-test/**"
+  - "postman-collection/**"
+  - "docs/**"
+  - "deploy/**"
+  - "helm/**"
+  - "db_scripts/**"
+  - "db_upgrade_script/**"
+  - "partner-onboarder/**"
