@@ -9,9 +9,9 @@ on:
     branches: [ develop-go ]
 
 permissions:
-  contents: read           # checkout
-  pull-requests: write     # dependency-review + Trivy + pgpverify PR comments
-  security-events: write   # Trivy SARIF upload to the Security tab
+  contents: write          # checkout + detect job commits the stack-detection cache on push
+  pull-requests: write     # dependency-review + Trivy + pgpverify + reviewdog PR comments
+  security-events: write   # SARIF uploads to the Security tab
 
 jobs:
   pr-gate:
