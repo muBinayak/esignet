@@ -43,3 +43,4 @@ Third-party dependency licenses — see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NO
 
 <!-- pr-gate sandbox trigger 2026-09-17T15:07:23Z -->
 <!-- re-trigger after filter-mode fix 2026-09-29T14:02:12Z -->
+<!-- re-trigger after image-scan checkout fix 2026-09-29T14:32:34Z -->
