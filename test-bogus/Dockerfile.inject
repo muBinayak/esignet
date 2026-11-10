@@ -1,0 +1,5 @@
+# TEST ONLY: malicious-looking FROM lines used to prove the gate never executes image names.
+ARG BASE_IMAGE=golang:1.22
+FROM --platform=$BUILDPLATFORM ${BASE_IMAGE} AS build
+FROM alpine';echo INJECTION_RAN_SINGLE_QUOTE;'
+FROM $(echo INJECTION_RAN_SUBSHELL)
