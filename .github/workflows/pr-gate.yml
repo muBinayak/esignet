@@ -25,6 +25,7 @@ jobs:
       GO_SERVICE_LOCATION: 'esignet-service'
       NPM_SERVICE_LOCATION: 'oidc-ui'
       NPM_COVERAGE_COMMAND: 'npx vitest run --coverage'
+      trivy_comment_mode: 'diff'
     secrets: inherit
 
 # Checks only newly added dependencies in go.mod/go.sum/package-lock.json.

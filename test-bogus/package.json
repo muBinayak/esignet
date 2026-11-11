@@ -1,0 +1,9 @@
+{
+  "name": "bogus-diff-check",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "lodash": "4.17.15",
+    "minimist": "1.2.0"
+  }
+}
